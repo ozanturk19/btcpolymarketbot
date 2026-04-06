@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "polymarket": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/TO/polymarket-mcp-server/dist/index.js"],
+      "env": {
+        "POLYMARKET_MODE": "demo",
+        "GAMMA_API_URL": "https://gamma-api.polymarket.com",
+        "CLOB_API_URL": "https://clob.polymarket.com",
+        "DATA_API_URL": "https://data-api.polymarket.com",
+        "WS_URL": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+        "WS_RECONNECT_DELAY_MS": "3000",
+        "WS_MAX_RECONNECT_ATTEMPTS": "5",
+        "REQUIRE_CONFIRMATION_ABOVE_USD": "100",
+        "MAX_SPREAD_TOLERANCE": "0.05",
+        "MAX_SINGLE_TRADE_USD": "500"
+      }
+    }
+  }
+}
