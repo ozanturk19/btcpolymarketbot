@@ -1,62 +1,46 @@
-import axios from 'axios';
+const GAMMA = 'https://gamma-api.polymarket.com';
+const CLOB  = 'https://clob.polymarket.com';
 
-const GAMMA  = 'https://gamma-api.polymarket.com';
-const CLOB   = 'https://clob.polymarket.com';
-
-const gamma = axios.create({ baseURL: GAMMA, timeout: 10_000 });
-const clob  = axios.create({ baseURL: CLOB,  timeout: 10_000 });
+async function fetchJson(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
 
 // ── Gamma API ────────────────────────────────────────────────────────────────
 
 export async function searchMarkets(query: string, limit = 20) {
-  const { data } = await gamma.get('/markets', {
-    params: { search: query, limit, active: true },
-  });
+  const data = await fetchJson(`${GAMMA}/markets?search=${encodeURIComponent(query)}&limit=${limit}&active=true`);
   return normalize(data);
 }
 
 export async function getTrendingMarkets(limit = 20) {
-  const { data } = await gamma.get('/markets', {
-    params: { order: 'volume24hr', ascending: false, active: true, limit },
-  });
+  const data = await fetchJson(`${GAMMA}/markets?order=volume24hr&ascending=false&active=true&limit=${limit}`);
   return normalize(data);
 }
 
 export async function getClosingSoon(hours = 24, limit = 20) {
   const now = new Date();
   const future = new Date(now.getTime() + hours * 3_600_000);
-  const { data } = await gamma.get('/markets', {
-    params: {
-      end_date_min: now.toISOString(),
-      end_date_max: future.toISOString(),
-      active: true, order: 'end_date', ascending: true, limit,
-    },
-  });
+  const data = await fetchJson(
+    `${GAMMA}/markets?end_date_min=${now.toISOString()}&end_date_max=${future.toISOString()}&active=true&order=end_date&ascending=true&limit=${limit}`
+  );
   return normalize(data);
 }
 
 export async function getMarketsByCategory(category: string, limit = 20) {
-  const { data } = await gamma.get('/markets', {
-    params: { tag_slug: category, active: true, limit },
-  });
+  const data = await fetchJson(`${GAMMA}/markets?tag_slug=${encodeURIComponent(category)}&active=true&limit=${limit}`);
   return normalize(data);
 }
 
 export async function getMarket(id: string) {
-  const { data } = await gamma.get(`/markets/${id}`);
-  return data;
-}
-
-export async function getEvent(id: string) {
-  const { data } = await gamma.get(`/events/${id}`);
-  return data;
+  return fetchJson(`${GAMMA}/markets/${encodeURIComponent(id)}`);
 }
 
 // ── CLOB API ─────────────────────────────────────────────────────────────────
 
 export async function getOrderbook(tokenId: string) {
-  const { data } = await clob.get('/book', { params: { token_id: tokenId } });
-  return data;
+  return fetchJson(`${CLOB}/book?token_id=${encodeURIComponent(tokenId)}`);
 }
 
 export async function getSpread(tokenId: string) {
@@ -81,20 +65,8 @@ export async function getLiquidity(tokenId: string) {
 export async function getPriceHistory(tokenId: string, days = 7, fidelity = 60) {
   const endTs   = Math.floor(Date.now() / 1000);
   const startTs = endTs - days * 86_400;
-  const { data } = await clob.get('/prices-history', {
-    params: { market: tokenId, startTs, endTs, fidelity },
-  });
+  const data = await fetchJson(`${CLOB}/prices-history?market=${encodeURIComponent(tokenId)}&startTs=${startTs}&endTs=${endTs}&fidelity=${fidelity}`);
   return data?.history ?? [];
-}
-
-export async function getPrice(tokenId: string) {
-  const [buy, sell] = await Promise.all([
-    clob.get('/price', { params: { token_id: tokenId, side: 'BUY' } }),
-    clob.get('/price', { params: { token_id: tokenId, side: 'SELL' } }),
-  ]);
-  const ask = Number(buy.data.price);
-  const bid = Number(sell.data.price);
-  return { bid, ask, mid: (bid + ask) / 2 };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -113,7 +85,6 @@ export function formatUsd(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
 }
 
-/** Kısa format: $1.2M, $45.3K, $500 */
 export function formatUsdShort(n: number) {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;

@@ -1,16 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { searchMarkets, getSpread, getLiquidity, getMarket, formatUsdShort } from '@/lib/polymarket';
 
 type Market = {
   id: string;
   question: string;
   clobTokenIds?: string[];
-  outcomePrices?: string[];
   volume24hr?: number;
 };
-
-import { formatUsdShort } from '@/lib/polymarket';
 
 type CompareResult = {
   label: string;
@@ -30,9 +28,10 @@ export default function ComparePage() {
 
   const doSearch = async () => {
     if (!search.trim()) return;
-    const res = await fetch(`/api/search?q=${encodeURIComponent(search)}&limit=10`);
-    const data = await res.json();
-    setAvailable(Array.isArray(data) ? data : []);
+    try {
+      const data = await searchMarkets(search, 10);
+      setAvailable(data as Market[]);
+    } catch { setAvailable([]); }
   };
 
   const addMarket = (m: Market) => {
@@ -51,13 +50,22 @@ export default function ComparePage() {
     if (selected.length < 2) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/compare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ markets: selected }),
-      });
-      const data = await res.json();
-      setResults(data.comparison ?? []);
+      const res = await Promise.all(selected.map(async (s) => {
+        const [spr, liq, mkt] = await Promise.all([
+          getSpread(s.token_id).catch(() => null),
+          getLiquidity(s.token_id).catch(() => null),
+          getMarket(s.market_id).catch(() => null),
+        ]);
+        return {
+          label: s.label,
+          token_id: s.token_id,
+          midpoint: spr?.midpoint ?? 0,
+          spreadPct: spr?.spreadPct ?? 0,
+          liquidity: liq?.total ?? 0,
+          volume24h: mkt?.volume24hr ?? 0,
+        };
+      }));
+      setResults(res);
     } catch { setResults([]); }
     setLoading(false);
   };
@@ -67,7 +75,6 @@ export default function ComparePage() {
       <h1 className="text-2xl font-bold text-white mb-1">Market Karşılaştırma</h1>
       <p className="text-gray-500 text-sm mb-4">2-6 market seç, spread/likidite/hacim karşılaştır.</p>
 
-      {/* Market arama ve ekleme */}
       <div className="flex gap-2 mb-4">
         <input
           value={search}
@@ -93,11 +100,10 @@ export default function ComparePage() {
         </div>
       )}
 
-      {/* Seçilen marketler */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
           {selected.map((s, i) => (
-            <span key={i} className="badge-blue flex items-center gap-1.5 px-3 py-1">
+            <span key={s.token_id} className="badge-blue flex items-center gap-1.5 px-3 py-1">
               {s.label.slice(0, 40)}{s.label.length > 40 ? '...' : ''}
               <button onClick={() => removeMarket(i)} className="text-blue-300 hover:text-white ml-1">&times;</button>
             </span>
@@ -109,7 +115,6 @@ export default function ComparePage() {
         {loading ? 'Karşılaştırılıyor...' : `Karşılaştır (${selected.length}/6)`}
       </button>
 
-      {/* Sonuçlar tablosu */}
       {results.length > 0 && (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">

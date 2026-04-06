@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import MarketCard from '@/components/MarketCard';
+import { searchMarkets } from '@/lib/polymarket';
 
 type Market = {
   id: string;
@@ -16,12 +17,11 @@ type Market = {
 };
 
 export default function SearchPage() {
-  const [query, setQuery]     = useState('');
-  const [results, setResults] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [query, setQuery]       = useState('');
+  const [results, setResults]   = useState<Market[]>([]);
+  const [loading, setLoading]   = useState(false);
   const [searched, setSearched] = useState(false);
-
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]       = useState<string | null>(null);
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -29,12 +29,10 @@ export default function SearchPage() {
     setSearched(true);
     setError(null);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=20`);
-      const data = await res.json();
-      if (data.error) { setError(data.error); setResults([]); }
-      else { setResults(Array.isArray(data) ? data : []); }
-    } catch {
-      setError('Arama yapılamadı');
+      const data = await searchMarkets(query, 20);
+      setResults(data as Market[]);
+    } catch (e) {
+      setError((e as Error).message);
       setResults([]);
     }
     setLoading(false);

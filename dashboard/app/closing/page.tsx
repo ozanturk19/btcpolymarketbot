@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import MarketCard from '@/components/MarketCard';
+import { getClosingSoon } from '@/lib/polymarket';
 
 type Market = {
   id: string;
@@ -22,9 +23,8 @@ export default function ClosingSoonPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/closing-soon?hours=${hours}&limit=20`)
-      .then(r => r.json())
-      .then(d => { setMarkets(Array.isArray(d) ? d : []); setLoading(false); })
+    getClosingSoon(hours, 20)
+      .then(data => { setMarkets(data as Market[]); setLoading(false); })
       .catch(() => setLoading(false));
   }, [hours]);
 
