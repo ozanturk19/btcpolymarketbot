@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background: #0a0e17;
+  color: #e5e7eb;
+}
+
+@layer components {
+  .card {
+    @apply bg-poly-card border border-poly-border rounded-xl p-5;
+  }
+  .badge-green {
+    @apply bg-poly-green/20 text-poly-green text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+  .badge-red {
+    @apply bg-poly-red/20 text-poly-red text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+  .badge-blue {
+    @apply bg-poly-blue/20 text-poly-blue text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+  .btn-primary {
+    @apply bg-poly-blue hover:bg-poly-blue/80 text-white font-medium px-4 py-2 rounded-lg transition-colors;
+  }
+}
