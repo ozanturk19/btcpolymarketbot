@@ -10,6 +10,8 @@ type Market = {
   volume24hr?: number;
 };
 
+import { formatUsdShort } from '@/lib/polymarket';
+
 type CompareResult = {
   label: string;
   token_id: string;
@@ -18,12 +20,6 @@ type CompareResult = {
   liquidity: number;
   volume24h: number;
 };
-
-function formatUsd(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-}
 
 export default function ComparePage() {
   const [search, setSearch]       = useState('');
@@ -127,23 +123,23 @@ export default function ComparePage() {
               </tr>
             </thead>
             <tbody>
-              {results.map((r, i) => {
+              {(() => {
                 const bestSpread = Math.min(...results.map(x => x.spreadPct));
                 const bestLiq    = Math.max(...results.map(x => x.liquidity));
-                return (
-                  <tr key={i} className="border-b border-poly-border/50">
+                return results.map(r => (
+                  <tr key={r.token_id} className="border-b border-poly-border/50">
                     <td className="py-2 text-white max-w-[200px] truncate">{r.label}</td>
                     <td className="py-2 text-right font-mono">{(r.midpoint * 100).toFixed(1)}¢</td>
                     <td className={`py-2 text-right font-mono ${r.spreadPct === bestSpread ? 'text-poly-green' : ''}`}>
                       {(r.spreadPct * 100).toFixed(2)}%
                     </td>
                     <td className={`py-2 text-right ${r.liquidity === bestLiq ? 'text-poly-green' : ''}`}>
-                      {formatUsd(r.liquidity)}
+                      {formatUsdShort(r.liquidity)}
                     </td>
-                    <td className="py-2 text-right">{formatUsd(r.volume24h)}</td>
+                    <td className="py-2 text-right">{formatUsdShort(r.volume24h)}</td>
                   </tr>
-                );
-              })}
+                ));
+              })()}
             </tbody>
           </table>
         </div>

@@ -21,15 +21,20 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
+  const [error, setError] = useState<string | null>(null);
+
   const handleSearch = async () => {
     if (!query.trim()) return;
     setLoading(true);
     setSearched(true);
+    setError(null);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=20`);
       const data = await res.json();
-      setResults(Array.isArray(data) ? data : []);
+      if (data.error) { setError(data.error); setResults([]); }
+      else { setResults(Array.isArray(data) ? data : []); }
     } catch {
+      setError('Arama yapılamadı');
       setResults([]);
     }
     setLoading(false);
@@ -52,8 +57,9 @@ export default function SearchPage() {
         </button>
       </div>
 
+      {error && <div className="text-center py-6 text-poly-red text-sm">{error}</div>}
       {loading && <div className="text-center py-10 text-gray-500">Aranıyor...</div>}
-      {!loading && searched && results.length === 0 && (
+      {!loading && !error && searched && results.length === 0 && (
         <div className="text-center py-10 text-gray-500">Sonuç bulunamadı</div>
       )}
       {results.length > 0 && (

@@ -9,8 +9,14 @@ const MAX_ALERTS = 200;
 
 function logAlert(event: string, details: string) {
   alertLog.unshift({ ts: new Date().toISOString(), event, details });
-  if (alertLog.length > MAX_ALERTS) alertLog.pop();
+  if (alertLog.length > MAX_ALERTS) alertLog.length = MAX_ALERTS;
   console.error(`[ALERT] ${event}: ${details}`);
+}
+
+/** Güvenli sayı dönüşümü: NaN/Infinity → 0 */
+function safeNum(val: unknown): number {
+  const n = Number(val);
+  return Number.isFinite(n) ? n : 0;
 }
 
 // ─── 1. subscribe_market_prices ──────────────────────────────────────────────
@@ -31,10 +37,11 @@ registerTool({
     wsManager.subscribe(subId, token_ids, 'market', (msg: WsMessage) => {
       if (msg.event_type !== 'price_change') return;
       const d = msg.data as { price?: string; side?: string };
-      const newPrice = Number(d.price ?? 0);
-      const prev     = prices[msg.asset_id];
+      const newPrice = safeNum(d.price);
+      if (newPrice <= 0) return; // Geçersiz fiyat
+      const prev = prices[msg.asset_id];
 
-      if (prev !== undefined) {
+      if (prev !== undefined && prev > 0) {
         const changePct = Math.abs((newPrice - prev) / prev) * 100;
         if (changePct >= min_change_pct) {
           logAlert('PRICE_CHANGE', `${msg.asset_id}: ${formatOdds(prev)} → ${formatOdds(newPrice)} (${changePct.toFixed(1)}%)`);
@@ -74,9 +81,11 @@ registerTool({
       const checkLevels = (levels: typeof d.bids, side: 'BID' | 'ASK') => {
         if (!levels) return;
         for (const l of levels) {
-          const usd = Number(l.price) * Number(l.size);
+          const price = safeNum(l.price);
+          const size  = safeNum(l.size);
+          const usd   = price * size;
           if (usd >= min_size_usd) {
-            logAlert('LARGE_ORDER', `${side} duvarı: ${formatOdds(Number(l.price))} × ${Number(l.size).toFixed(0)} = $${usd.toFixed(0)}`);
+            logAlert('LARGE_ORDER', `${side} duvarı: ${formatOdds(price)} × ${size.toFixed(0)} = $${usd.toFixed(0)}`);
           }
         }
       };
@@ -110,7 +119,7 @@ registerTool({
     wsManager.subscribe(subId, [wallet_address], 'user', (msg: WsMessage) => {
       if (msg.event_type !== 'trade') return;
       const d = msg.data as { price?: string; size?: string; side?: string };
-      logAlert('TRADE_FILLED', `${d.side} ${d.size} @ ${formatOdds(Number(d.price))}`);
+      logAlert('TRADE_FILLED', `${d.side ?? '?'} ${d.size ?? '?'} @ ${formatOdds(safeNum(d.price))}`);
     });
 
     return {

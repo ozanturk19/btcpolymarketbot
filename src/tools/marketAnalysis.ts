@@ -19,18 +19,24 @@ registerTool({
   async handler({ token_id, condition_id, market_id }: {
     token_id: string; condition_id: string; market_id: string;
   }) {
-    // Paralel veri çekimi
+    // Paralel veri çekimi - hatalar warnings'e eklenir
+    let marketFetchFailed = false;
+    let historyFetchFailed = false;
+
     const [spread, liquidity, market, history] = await Promise.all([
       clob.getSpread(token_id),
       clob.getLiquidity(token_id),
-      gamma.getMarket(market_id).catch(() => null),
-      clob.getPriceHistory(token_id, Math.floor(Date.now() / 1000) - 7 * 86_400).catch(() => []),
+      gamma.getMarket(market_id).catch(() => { marketFetchFailed = true; return null; }),
+      clob.getPriceHistory(token_id, Math.floor(Date.now() / 1000) - 7 * 86_400).catch(() => { historyFetchFailed = true; return []; }),
     ]);
 
     // ── Skor Hesaplama (0-100) ──
     let score = 50;
     const signals: string[] = [];
     const warnings: string[] = [];
+
+    if (marketFetchFailed)  warnings.push('Market metadata alınamadı - hacim/kapanış verisi eksik');
+    if (historyFetchFailed) warnings.push('Fiyat geçmişi alınamadı - trend analizi yapılamadı');
 
     // 1. Spread analizi (dar = iyi)
     if (spread.spreadPct < 0.02) {
@@ -60,22 +66,30 @@ registerTool({
       warnings.push('Çok düşük 24s hacim: market inaktif olabilir');
     }
 
-    // 4. Fiyat trendi (7 günlük)
+    // 4. Fiyat trendi (7 günlük) - yüzdesel değişim baz alınır
     let trend = 'YATAY';
     let priceChange = 0;
-    if (history.length > 1) {
+    if (history.length > 1 && !historyFetchFailed) {
       const first = Number(history[0].p);
       const last  = Number(history[history.length - 1].p);
       priceChange = last - first;
-      if (priceChange > 0.05)       { score += 5; trend = 'YUKARI'; signals.push('7g yukarı trend'); }
-      else if (priceChange < -0.05) { score -= 5; trend = 'AŞAĞI';  signals.push('7g aşağı trend'); }
+      // Yüzdesel değişim: mutlak fark yerine first'e göre oran
+      const pctChange = first > 0 ? Math.abs(priceChange) / first : 0;
+      if (pctChange > 0.1) { // %10+ değişim anlamlı
+        if (priceChange > 0) { score += 5; trend = 'YUKARI'; signals.push(`7g yukarı trend (+${(pctChange * 100).toFixed(0)}%)`); }
+        else                 { trend = 'AŞAĞI'; signals.push(`7g aşağı trend (-${(pctChange * 100).toFixed(0)}%)`); }
+      }
     }
 
     // 5. Kapanış süresi
-    const closingIn = market?.endDate ? timeUntil(market.endDate) : 'Bilinmiyor';
+    let closingIn = 'Bilinmiyor';
     if (market?.endDate) {
-      const daysLeft = (new Date(market.endDate).getTime() - Date.now()) / 86_400_000;
-      if (daysLeft < 1) { score -= 10; warnings.push('24s içinde kapanıyor: likidite azalabilir'); }
+      const endTime = new Date(market.endDate).getTime();
+      if (!isNaN(endTime)) {
+        closingIn = timeUntil(market.endDate);
+        const daysLeft = (endTime - Date.now()) / 86_400_000;
+        if (daysLeft < 1 && daysLeft > 0) { score -= 10; warnings.push('24s içinde kapanıyor: likidite azalabilir'); }
+      }
     }
 
     // ── Karar ──

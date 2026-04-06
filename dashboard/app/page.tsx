@@ -25,7 +25,7 @@ export default function Home() {
     fetch('/api/trending?limit=12')
       .then(r => r.json())
       .then(d => { setTrending(Array.isArray(d) ? d : []); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch(() => { setLoading(false); console.error('Trending marketler yüklenemedi'); });
   }, []);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function Home() {
     fetch(`/api/markets?category=${category}&limit=12`)
       .then(r => r.json())
       .then(d => setCategoryMarkets(Array.isArray(d) ? d : []))
-      .catch(() => {});
+      .catch(() => { setCategoryMarkets([]); console.error(`${category} marketleri yüklenemedi`); });
   }, [category]);
 
   const categories = [

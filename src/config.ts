@@ -1,6 +1,18 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+/** NaN-safe env → number dönüşümü */
+function envNum(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (isNaN(n)) {
+    console.error(`[Config] Geçersiz sayı: ${key}="${raw}", varsayılan kullanılıyor: ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 export const config = {
   mode: (process.env.POLYMARKET_MODE || 'demo') as 'demo' | 'full',
 
@@ -16,15 +28,15 @@ export const config = {
   },
 
   safety: {
-    requireConfirmationAboveUsd: Number(process.env.REQUIRE_CONFIRMATION_ABOVE_USD || 100),
-    maxSpreadTolerance:          Number(process.env.MAX_SPREAD_TOLERANCE            || 0.05),
-    maxSingleTradeUsd:           Number(process.env.MAX_SINGLE_TRADE_USD            || 500),
+    requireConfirmationAboveUsd: envNum('REQUIRE_CONFIRMATION_ABOVE_USD', 100),
+    maxSpreadTolerance:          envNum('MAX_SPREAD_TOLERANCE', 0.05),
+    maxSingleTradeUsd:           envNum('MAX_SINGLE_TRADE_USD', 500),
   },
 
   ws: {
-    url:                process.env.WS_URL                    || 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
-    reconnectDelayMs:   Number(process.env.WS_RECONNECT_DELAY_MS   || 3000),
-    maxReconnectAttempts: Number(process.env.WS_MAX_RECONNECT_ATTEMPTS || 5),
+    url:                  process.env.WS_URL || 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
+    reconnectDelayMs:     envNum('WS_RECONNECT_DELAY_MS', 3000),
+    maxReconnectAttempts: envNum('WS_MAX_RECONNECT_ATTEMPTS', 5),
   },
 } as const;
 

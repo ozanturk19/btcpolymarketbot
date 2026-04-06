@@ -27,7 +27,6 @@ export class WebSocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isClosing    = false;
 
-  /** Token ID listesi için subscribe */
   subscribe(id: string, tokenIds: string[], type: 'market' | 'user', callback: AlertCallback): void {
     this.subs.set(id, { id, tokenIds, type, callback });
     if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
@@ -39,36 +38,56 @@ export class WebSocketManager {
 
   unsubscribe(id: string): void {
     this.subs.delete(id);
-    if (this.subs.size === 0) this.disconnect();
+    // Son abonelik çıkınca bağlantıyı hemen kesme - reconnect race condition önlenir
+    if (this.subs.size === 0) {
+      // Kısa gecikme: hemen yeni subscribe gelirse gereksiz disconnect/connect döngüsü olmaz
+      setTimeout(() => {
+        if (this.subs.size === 0) this.disconnect();
+      }, 2000);
+    }
+  }
+
+  private cleanupWs(): void {
+    if (!this.ws) return;
+    this.ws.removeAllListeners();
+    this.ws = null;
   }
 
   private connect(): void {
     if (this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
 
-    console.error(`[WS] Bağlanıyor: ${config.ws.url}`);
-    this.ws = new WebSocket(config.ws.url);
+    // Eski bağlantının listener'larını temizle (memory leak önlenir)
+    this.cleanupWs();
 
-    this.ws.on('open', () => {
+    console.error(`[WS] Bağlanıyor: ${config.ws.url}`);
+    const ws = new WebSocket(config.ws.url);
+    this.ws = ws;
+
+    ws.on('open', () => {
       console.error('[WS] Bağlantı kuruldu');
       this.reconnects = 0;
+      this.reconnectTimer = null;
       for (const sub of this.subs.values()) {
         this.sendSubscription(sub.tokenIds, sub.type);
       }
     });
 
-    this.ws.on('message', (raw: WebSocket.RawData) => {
+    ws.on('message', (raw: WebSocket.RawData) => {
       try {
-        const messages: unknown[] = JSON.parse(raw.toString());
-        if (!Array.isArray(messages)) return;
+        const parsed: unknown = JSON.parse(raw.toString());
+        // API bazen tek obje, bazen dizi döndürür
+        const messages = Array.isArray(parsed) ? parsed : [parsed];
         for (const msg of messages) this.handleMessage(msg);
-      } catch { /* parse hataları yok say */ }
+      } catch {
+        // Geçersiz JSON - yoksay
+      }
     });
 
-    this.ws.on('error', (err) => {
+    ws.on('error', (err) => {
       console.error('[WS] Hata:', err.message);
     });
 
-    this.ws.on('close', () => {
+    ws.on('close', () => {
       if (!this.isClosing && this.subs.size > 0) {
         this.scheduleReconnect();
       }
@@ -90,47 +109,51 @@ export class WebSocketManager {
     if (typeof raw !== 'object' || !raw) return;
     const msg = raw as Record<string, unknown>;
 
-    let event: WsMessage | null = null;
+    const eventType = String(msg.event_type ?? '');
+    const assetId   = String(msg.asset_id ?? '');
+    const market    = String(msg.market ?? '');
 
-    if (msg.event_type === 'price_change') {
-      event = {
-        event_type: 'price_change',
-        asset_id:   String(msg.asset_id ?? ''),
-        market:     String(msg.market   ?? ''),
-        data:       { price: msg.price, side: msg.side },
-        timestamp:  new Date().toISOString(),
-      };
-    } else if (msg.event_type === 'book') {
-      event = {
-        event_type: 'book_update',
-        asset_id:   String(msg.asset_id ?? ''),
-        market:     String(msg.market   ?? ''),
-        data:       { bids: msg.bids, asks: msg.asks },
-        timestamp:  new Date().toISOString(),
-      };
-    } else if (msg.event_type === 'trade') {
-      event = {
-        event_type: 'trade',
-        asset_id:   String(msg.asset_id ?? ''),
-        market:     String(msg.market   ?? ''),
-        data:       { price: msg.price, size: msg.size, side: msg.side },
-        timestamp:  new Date().toISOString(),
-      };
-    } else if (msg.event_type === 'market_resolved') {
-      event = {
-        event_type: 'market_resolved',
-        asset_id:   String(msg.asset_id ?? ''),
-        market:     String(msg.market   ?? ''),
-        data:       { outcome: msg.outcome, resolution: msg.resolution },
-        timestamp:  new Date().toISOString(),
-      };
+    if (!assetId) return;
+
+    let wsEventType: WsEventType;
+    let data: unknown;
+
+    switch (eventType) {
+      case 'price_change':
+        wsEventType = 'price_change';
+        data = { price: String(msg.price ?? '0'), side: String(msg.side ?? '') };
+        break;
+      case 'book':
+        wsEventType = 'book_update';
+        data = { bids: Array.isArray(msg.bids) ? msg.bids : [], asks: Array.isArray(msg.asks) ? msg.asks : [] };
+        break;
+      case 'trade':
+        wsEventType = 'trade';
+        data = { price: String(msg.price ?? '0'), size: String(msg.size ?? '0'), side: String(msg.side ?? '') };
+        break;
+      case 'market_resolved':
+        wsEventType = 'market_resolved';
+        data = { outcome: String(msg.outcome ?? ''), resolution: String(msg.resolution ?? '') };
+        break;
+      default:
+        return; // Bilinmeyen event tipi
     }
 
-    if (!event) return;
+    const event: WsMessage = {
+      event_type: wsEventType,
+      asset_id:   assetId,
+      market,
+      data,
+      timestamp:  new Date().toISOString(),
+    };
 
     for (const sub of this.subs.values()) {
       if (sub.tokenIds.includes(event.asset_id) || sub.tokenIds.length === 0) {
-        sub.callback(event);
+        try {
+          sub.callback(event);
+        } catch (err) {
+          console.error(`[WS] Callback hatası (${sub.id}):`, err);
+        }
       }
     }
   }
@@ -148,19 +171,21 @@ export class WebSocketManager {
 
   disconnect(): void {
     this.isClosing = true;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.ws?.close();
-    this.ws = null;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.cleanupWs();
     this.isClosing = false;
   }
 
-  getStatus(): { connected: boolean; subscriptions: number } {
+  getStatus(): { connected: boolean; subscriptions: number; subscriberIds: string[] } {
     return {
       connected:     this.ws?.readyState === WebSocket.OPEN,
       subscriptions: this.subs.size,
+      subscriberIds: Array.from(this.subs.keys()),
     };
   }
 }
 
-// Singleton instance
 export const wsManager = new WebSocketManager();

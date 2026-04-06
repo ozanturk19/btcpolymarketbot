@@ -113,6 +113,13 @@ export function formatUsd(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
 }
 
+/** Kısa format: $1.2M, $45.3K, $500 */
+export function formatUsdShort(n: number) {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
 export function timeUntil(endDate: string) {
   const diff = new Date(endDate).getTime() - Date.now();
   if (diff < 0) return 'Sona erdi';

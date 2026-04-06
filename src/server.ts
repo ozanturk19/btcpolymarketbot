@@ -81,7 +81,9 @@ function zodToJsonSchema(schema: z.ZodTypeAny): Tool['inputSchema'] {
 
     for (const [key, val] of Object.entries(shape)) {
       properties[key] = zodFieldToJson(val as z.ZodTypeAny);
-      if (!(val instanceof z.ZodOptional)) required.push(key);
+      if (!(val instanceof z.ZodOptional) && !(val instanceof z.ZodDefault)) {
+        required.push(key);
+      }
     }
 
     return { type: 'object', properties, required };
@@ -89,14 +91,21 @@ function zodToJsonSchema(schema: z.ZodTypeAny): Tool['inputSchema'] {
   return { type: 'object', properties: {} };
 }
 
-function zodFieldToJson(field: z.ZodTypeAny): { type: string; description?: string; enum?: string[]; default?: unknown } {
-  if (field instanceof z.ZodOptional) return zodFieldToJson(field.unwrap());
-  if (field instanceof z.ZodDefault) return { ...zodFieldToJson(field.removeDefault()), default: field._def.defaultValue() };
-  if (field instanceof z.ZodString)  return { type: 'string' };
-  if (field instanceof z.ZodNumber)  return { type: 'number' };
-  if (field instanceof z.ZodBoolean) return { type: 'boolean' };
-  if (field instanceof z.ZodEnum)    return { type: 'string', enum: field.options as string[] };
-  if (field instanceof z.ZodArray)   return { type: 'array' } as { type: string };
+function zodFieldToJson(field: z.ZodTypeAny): { type: string; description?: string; enum?: string[]; default?: unknown; items?: { type: string } } {
+  if (field instanceof z.ZodOptional)  return zodFieldToJson(field.unwrap());
+  if (field instanceof z.ZodDefault) {
+    const defaultVal = typeof field._def.defaultValue === 'function' ? field._def.defaultValue() : field._def.defaultValue;
+    return { ...zodFieldToJson(field.removeDefault()), default: defaultVal };
+  }
+  if (field instanceof z.ZodString)    return { type: 'string' };
+  if (field instanceof z.ZodNumber)    return { type: 'number' };
+  if (field instanceof z.ZodBoolean)   return { type: 'boolean' };
+  if (field instanceof z.ZodEnum)      return { type: 'string', enum: [...(field.options as string[])] };
+  if (field instanceof z.ZodArray) {
+    const inner = field._def.type ? zodFieldToJson(field._def.type as z.ZodTypeAny) : { type: 'string' };
+    return { type: 'array', items: { type: inner.type } };
+  }
+  if (field instanceof z.ZodLiteral)   return { type: typeof field._def.value === 'number' ? 'number' : 'string' };
   return { type: 'string' };
 }
 

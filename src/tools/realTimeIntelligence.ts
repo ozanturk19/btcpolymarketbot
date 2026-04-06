@@ -1,11 +1,19 @@
 import { z } from 'zod';
 import { ClobClient } from '../api/clob';
+import { GammaClient } from '../api/gamma';
 import { DataClient } from '../api/data';
 import { registerTool } from '../server';
 import { formatOdds, formatUsd, tsToIso } from '../utils/toolHelper';
 
-const clob = new ClobClient();
-const data = new DataClient();
+const clob  = new ClobClient();
+const gamma = new GammaClient();
+const data  = new DataClient();
+
+/** NaN-safe sayı dönüşümü */
+function safeNum(val: unknown): number {
+  const n = Number(val);
+  return Number.isFinite(n) ? n : 0;
+}
 
 // ─── 1. get_orderbook ────────────────────────────────────────────────────────
 registerTool({
@@ -20,8 +28,8 @@ registerTool({
     return {
       asset_id:  book.asset_id,
       timestamp: new Date(book.timestamp).toISOString(),
-      bids:      book.bids.slice(0, depth).map(l => ({ price: formatOdds(Number(l.price)), size: Number(l.size).toFixed(2), raw_price: Number(l.price) })),
-      asks:      book.asks.slice(0, depth).map(l => ({ price: formatOdds(Number(l.price)), size: Number(l.size).toFixed(2), raw_price: Number(l.price) })),
+      bids:      book.bids.slice(0, depth).map(l => ({ price: formatOdds(safeNum(l.price)), size: safeNum(l.size).toFixed(2), raw_price: safeNum(l.price) })),
+      asks:      book.asks.slice(0, depth).map(l => ({ price: formatOdds(safeNum(l.price)), size: safeNum(l.size).toFixed(2), raw_price: safeNum(l.price) })),
       summary: {
         bestBid: book.bids[0] ? formatOdds(Number(book.bids[0].price)) : 'N/A',
         bestAsk: book.asks[0] ? formatOdds(Number(book.asks[0].price)) : 'N/A',
@@ -128,7 +136,7 @@ registerTool({
     market_id: z.string().describe('Gamma market ID\'si'),
   }),
   async handler({ market_id }: { market_id: string }) {
-    const market = await new (await import('../api/gamma')).GammaClient().getMarket(market_id);
+    const market = await gamma.getMarket(market_id);
     return {
       market_id,
       question:    market.question,

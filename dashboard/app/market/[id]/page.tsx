@@ -5,43 +5,53 @@ import { useParams } from 'next/navigation';
 import PriceChart from '@/components/PriceChart';
 import OrderbookVisual from '@/components/OrderbookVisual';
 import AnalysisBadge from '@/components/AnalysisBadge';
+import { formatUsdShort, timeUntil } from '@/lib/polymarket';
 
-function formatUsd(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-}
-
-function timeUntil(endDate: string) {
-  const diff = new Date(endDate).getTime() - Date.now();
-  if (diff < 0) return 'Sona erdi';
-  const d = Math.floor(diff / 86_400_000);
-  const h = Math.floor((diff % 86_400_000) / 3_600_000);
-  if (d > 0) return `${d}g ${h}s`;
-  return `${h}s`;
+interface MarketData {
+  id: string;
+  question: string;
+  outcomes?: string[];
+  outcomePrices?: string[];
+  volumeNum?: number;
+  volume?: number;
+  liquidityNum?: number;
+  liquidity?: number;
+  endDate?: string;
+  image?: string;
+  clobTokenIds?: string[];
 }
 
 export default function MarketDetail() {
   const { id } = useParams<{ id: string }>();
-  const [market, setMarket]     = useState<Record<string, unknown> | null>(null);
+  const [market, setMarket]     = useState<MarketData | null>(null);
   const [orderbook, setBook]    = useState<{ bids: Array<{ price: string; size: string }>; asks: Array<{ price: string; size: string }> } | null>(null);
   const [spread, setSpread]     = useState<{ bid: number; ask: number; midpoint: number; spreadPct: number } | null>(null);
   const [history, setHistory]   = useState<Array<{ t: number; p: string }>>([]);
   const [analysis, setAnalysis] = useState<{ decision: 'BUY' | 'SELL' | 'HOLD'; score: number; signals: string[]; warnings: string[] } | null>(null);
   const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
+    setLoading(true);
+    setError(null);
+
     fetch(`/api/market?id=${id}`)
       .then(r => r.json())
-      .then(m => {
+      .then(data => {
+        // API hata dönerse kontrol et
+        if (data.error) {
+          setError(data.error);
+          setLoading(false);
+          return;
+        }
+        const m = data as MarketData;
         setMarket(m);
         setLoading(false);
 
-        const tokenId = (m.clobTokenIds as string[])?.[0];
+        const tokenId = m.clobTokenIds?.[0];
         if (!tokenId) return;
 
-        // Paralel veri çekimi
         Promise.all([
           fetch(`/api/orderbook?token_id=${tokenId}`).then(r => r.json()).catch(() => null),
           fetch(`/api/spread?token_id=${tokenId}`).then(r => r.json()).catch(() => null),
@@ -49,33 +59,38 @@ export default function MarketDetail() {
           fetch(`https://clob.polymarket.com/prices-history?market=${tokenId}&fidelity=60&startTs=${Math.floor(Date.now() / 1000) - 7 * 86400}`)
             .then(r => r.json()).then(d => d?.history ?? []).catch(() => []),
         ]).then(([book, spr, anal, hist]) => {
-          if (book) setBook(book);
-          if (spr)  setSpread(spr);
+          if (book && !book.error) setBook(book);
+          if (spr && !spr.error)   setSpread(spr);
           if (anal && !anal.error) setAnalysis(anal);
           setHistory(hist);
         });
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        setError('Market verisi yüklenemedi');
+        setLoading(false);
+      });
   }, [id]);
 
   if (loading) return <div className="max-w-5xl mx-auto px-4 py-20 text-center text-gray-500">Yükleniyor...</div>;
+  if (error)   return <div className="max-w-5xl mx-auto px-4 py-20 text-center text-poly-red">{error}</div>;
   if (!market) return <div className="max-w-5xl mx-auto px-4 py-20 text-center text-gray-500">Market bulunamadı</div>;
 
-  const m = market as Record<string, unknown>;
-  const prices = ((m.outcomePrices as string[]) ?? []).map(Number);
-  const outcomes = (m.outcomes as string[]) ?? [];
+  const prices   = (market.outcomePrices ?? []).map(Number);
+  const outcomes = market.outcomes ?? [];
+  const volume   = market.volumeNum ?? market.volume ?? 0;
+  const liq      = market.liquidityNum ?? market.liquidity ?? 0;
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       {/* Başlık */}
       <div className="flex gap-4 items-start mb-6">
-        {m.image && <img src={m.image as string} alt="" className="w-14 h-14 rounded-xl object-cover" />}
+        {market.image && <img src={market.image} alt={market.question} className="w-14 h-14 rounded-xl object-cover" />}
         <div>
-          <h1 className="text-xl font-bold text-white mb-1">{m.question as string}</h1>
+          <h1 className="text-xl font-bold text-white mb-1">{market.question}</h1>
           <div className="flex gap-3 text-xs text-gray-500">
-            <span>Hacim: {formatUsd((m.volumeNum ?? m.volume ?? 0) as number)}</span>
-            <span>Likidite: {formatUsd((m.liquidityNum ?? m.liquidity ?? 0) as number)}</span>
-            {m.endDate && <span>Kapanış: {timeUntil(m.endDate as string)}</span>}
+            <span>Hacim: {formatUsdShort(volume)}</span>
+            <span>Likidite: {formatUsdShort(liq)}</span>
+            {market.endDate && <span>Kapanış: {timeUntil(market.endDate)}</span>}
           </div>
         </div>
       </div>

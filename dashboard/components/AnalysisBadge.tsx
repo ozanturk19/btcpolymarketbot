@@ -29,8 +29,8 @@ export default function AnalysisBadge({ decision, score, signals, warnings }: An
 
       {signals.length > 0 && (
         <div className="mb-2">
-          {signals.map((s, i) => (
-            <div key={i} className="text-xs text-poly-green flex items-center gap-1.5 py-0.5">
+          {signals.map(s => (
+            <div key={s} className="text-xs text-poly-green flex items-center gap-1.5 py-0.5">
               <span>+</span>{s}
             </div>
           ))}
@@ -38,8 +38,8 @@ export default function AnalysisBadge({ decision, score, signals, warnings }: An
       )}
       {warnings.length > 0 && (
         <div>
-          {warnings.map((w, i) => (
-            <div key={i} className="text-xs text-poly-red flex items-center gap-1.5 py-0.5">
+          {warnings.map(w => (
+            <div key={w} className="text-xs text-poly-red flex items-center gap-1.5 py-0.5">
               <span>!</span>{w}
             </div>
           ))}
