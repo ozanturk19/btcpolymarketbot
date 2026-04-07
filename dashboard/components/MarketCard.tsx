@@ -15,16 +15,7 @@ interface MarketCardProps {
 }
 
 export default function MarketCard({ id, question, outcomes, outcomePrices, volume24hr, liquidity, endDate, image }: MarketCardProps) {
-  // Gamma API returns outcomes and outcomePrices as JSON strings: "[\"Yes\",\"No\"]"
-  function parseJsonField(val: unknown): string[] {
-    if (Array.isArray(val)) return val;
-    if (typeof val === 'string') {
-      try { const parsed = JSON.parse(val); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
-    }
-    return [];
-  }
-  const parsedOutcomes = parseJsonField(outcomes);
-  const prices = parseJsonField(outcomePrices).map(Number);
+  const prices = (outcomePrices ?? []).map(Number);
 
   return (
     <Link href={`/market/${id}`} className="card hover:border-poly-blue/50 transition-colors block">
@@ -35,9 +26,9 @@ export default function MarketCard({ id, question, outcomes, outcomePrices, volu
         <div className="flex-1 min-w-0">
           <h3 className="font-medium text-white text-sm leading-snug line-clamp-2 mb-3">{question}</h3>
 
-          {parsedOutcomes.length > 0 && (
+          {outcomes && outcomes.length > 0 && (
             <div className="flex gap-2 mb-3">
-              {parsedOutcomes.slice(0, 2).map((o, i) => (
+              {outcomes.slice(0, 2).map((o, i) => (
                 <div key={o} className={`flex-1 text-center py-1.5 rounded-lg text-xs font-semibold ${
                   i === 0 ? 'bg-poly-green/15 text-poly-green' : 'bg-poly-red/15 text-poly-red'
                 }`}>

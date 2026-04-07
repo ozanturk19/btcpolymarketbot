@@ -1,248 +1,265 @@
-# Polymarket MCP Server & Dashboard - Proje Planı
+# Polymarket MCP Integration — Proje Planı
 
-## Genel Bakış
-
-Bu proje iki ana bileşenden oluşur:
-1. **MCP Server** — Claude Desktop ile entegre çalışan 25 araçlık Polymarket veri servisi
-2. **Next.js Dashboard** — Tarayıcıdan erişilen görsel Polymarket panosu (port 8004)
-
-**Repo:** `ozanturk19/claude`  
-**Branch:** `claude/polymarket-mcp-integration-F3JjW`  
-**Dil:** TypeScript (backend + frontend)  
-**Lisans:** Kişisel kullanım
-
----
-
-## Proje Dizin Yapısı
+## Dizin Yapısı
 
 ```
-/home/user/claude/
-├── package.json              # MCP Server bağımlılıkları
-├── tsconfig.json             # TypeScript ayarları (ES2020, strict)
-├── .env.example              # Ortam değişkenleri şablonu
-├── .gitignore                # node_modules, dist, .next, .env
-├── README.md                 # Türkçe proje dokümantasyonu
-├── config/
-│   └── claude_desktop_config.json  # Claude Desktop MCP kayıt dosyası
-│
-├── src/                      # === MCP SERVER ===
-│   ├── index.ts              # Giriş noktası — tool modüllerini yükler, server başlatır
-│   ├── server.ts             # MCP server, tool registry, Zod→JSON Schema dönüştürücü
-│   ├── config.ts             # Ortam değişkenleri, NaN-safe envNum(), mod kontrolü
+/tmp/claude-poly/
+├── src/                        # MCP Server (Node.js/TypeScript)
+│   ├── index.ts                # MCP server entry point
+│   ├── server.ts               # Server başlatma ve yapılandırma
+│   ├── config.ts               # Ortam değişkenleri ve sabitler
 │   ├── api/
-│   │   ├── gamma.ts          # GammaClient — pazar keşif API (markets, events, trending)
-│   │   ├── clob.ts           # ClobClient — orderbook, spread, fiyat, likidite, tarihçe
-│   │   └── data.ts           # DataClient — pozisyonlar, aktivite, portföy (full mode)
+│   │   ├── gamma.ts            # Gamma API (piyasa verileri, meta)
+│   │   ├── clob.ts             # CLOB API (order book, trades)
+│   │   └── data.ts             # Data API (geçmiş fiyatlar)
 │   ├── tools/
-│   │   ├── marketDiscovery.ts      # 8 araç: search, trending, category, closing_soon, event, featured, sports, crypto
-│   │   ├── realTimeIntelligence.ts # 10 araç: orderbook, spread, price, history, volume, liquidity, holders, details, compare, composition
-│   │   ├── marketAnalysis.ts       # 1 araç: analyze_market_opportunity (BUY/SELL/HOLD + skor)
-│   │   └── websocketTools.ts       # 7 araç: subscribe prices/orderbook/trades/resolution, alerts, unsubscribe, ws_status
-│   ├── websocket/
-│   │   └── wsManager.ts      # WebSocket singleton — reconnect, cleanup, subscription yönetimi
-│   └── utils/
-│       └── toolHelper.ts     # ToolDefinition tipi, formatResult, formatError, formatOdds, formatUsd, timeUntil
-│
-├── dashboard/                # === NEXT.JS DASHBOARD ===
-│   ├── package.json          # Next.js 14, React 18, Recharts, Tailwind CSS
-│   ├── next.config.js        # Next.js yapılandırması (varsayılan)
-│   ├── tsconfig.json         # TypeScript (Next.js preset, strict)
-│   ├── tailwind.config.js    # Özel renkler: poly-green, poly-red, poly-blue, poly-dark, poly-card, poly-border
-│   ├── postcss.config.js     # Tailwind + autoprefixer
-│   ├── ecosystem.config.js   # PM2 yapılandırması (port 8004, /opt/polymarket/dashboard)
-│   ├── start.sh              # Üretim başlatma scripti (nohup + PID kayıt)
-│   ├── stop.sh               # Durdurma scripti
-│   │
+│   │   ├── marketDiscovery.ts  # Piyasa keşfi araçları
+│   │   ├── marketAnalysis.ts   # Teknik analiz araçları
+│   │   ├── realTimeIntelligence.ts  # Gerçek zamanlı zeka
+│   │   └── websocketTools.ts   # WebSocket araçları
+│   ├── utils/
+│   │   └── toolHelper.ts       # Yardımcı fonksiyonlar
+│   └── websocket/
+│       └── wsManager.ts        # WebSocket bağlantı yöneticisi
+├── dashboard/                  # Next.js Dashboard (React/TypeScript)
 │   ├── app/
-│   │   ├── globals.css       # Global stiller: dark tema, .card, .badge-*, .btn-primary
-│   │   ├── layout.tsx        # Root layout: metadata, Navbar, ana içerik slotu
-│   │   ├── page.tsx          # Ana sayfa: trending pazarlar + kategori filtresi (politics/sports/crypto)
-│   │   ├── search/
-│   │   │   └── page.tsx      # Arama sayfası: keyword ile pazar ara
-│   │   ├── closing/
-│   │   │   └── page.tsx      # Kapanacaklar: N saat içinde kapanan pazarlar
-│   │   ├── compare/
-│   │   │   └── page.tsx      # Karşılaştırma: birden fazla pazarı yan yana analiz
-│   │   └── market/
-│   │       └── [id]/
-│   │           └── page.tsx  # Pazar detay: grafik, orderbook, spread, analiz badge
-│   │
+│   │   ├── layout.tsx          # Ana layout (Navbar dahil)
+│   │   ├── page.tsx            # Ana sayfa (trending piyasalar)
+│   │   ├── search/page.tsx     # Piyasa arama
+│   │   ├── compare/page.tsx    # Piyasa karşılaştırma
+│   │   ├── closing/page.tsx    # Kapanacak piyasalar
+│   │   └── market/[id]/page.tsx # Piyasa detay sayfası
 │   ├── components/
-│   │   ├── Navbar.tsx        # Navigasyon: Dashboard, Ara, Kapanacaklar, Karşılaştır
-│   │   ├── MarketCard.tsx    # Pazar kartı: soru, fiyat, hacim, likidite, süre
-│   │   ├── PriceChart.tsx    # Fiyat grafiği: 7 gün OHLC (Recharts LineChart)
-│   │   ├── OrderbookVisual.tsx # Orderbook: bid/ask derinlik çubukları (8 seviye)
-│   │   └── AnalysisBadge.tsx # Analiz rozeti: BUY/SELL/HOLD + güven skoru + sinyaller
-│   │
-│   └── lib/
-│       └── polymarket.ts     # Client-side API: searchMarkets, getTrending, getClosingSoon, getOrderbook, getSpread, getPriceHistory + yardımcı fonksiyonlar
+│   │   ├── MarketCard.tsx      # Piyasa kartı bileşeni
+│   │   ├── PriceChart.tsx      # Fiyat grafiği (Recharts)
+│   │   ├── OrderbookVisual.tsx # Order book görselleştirme
+│   │   ├── AnalysisBadge.tsx   # Analiz rozeti
+│   │   └── Navbar.tsx          # Navigasyon çubuğu
+│   ├── lib/
+│   │   └── polymarket.ts       # API çağrı katmanı (client-side)
+│   ├── ecosystem.config.js     # PM2 yapılandırması
+│   ├── start.sh                # Başlatma scripti
+│   └── stop.sh                 # Durdurma scripti
+├── config/                     # Yapılandırma dosyaları
+├── .env.example                # Örnek ortam değişkenleri
+├── package.json                # MCP server bağımlılıkları
+└── tsconfig.json               # TypeScript yapılandırması
 ```
 
----
+## MCP Araçları (25+)
 
-## Bileşen Detayları
+| Araç | Kategori | Açıklama |
+|------|----------|----------|
+| `search_markets` | Keşif | Anahtar kelimeyle piyasa ara |
+| `get_trending_markets` | Keşif | Trending piyasaları getir |
+| `get_markets_by_category` | Keşif | Kategoriye göre piyasaları filtrele |
+| `get_closing_soon_markets` | Keşif | Yakında kapanacak piyasaları getir |
+| `get_market_details` | Analiz | Detaylı piyasa bilgisi |
+| `get_market_price_history` | Analiz | Geçmiş fiyat verisi |
+| `get_market_orderbook` | Analiz | Order book snapshot |
+| `analyze_market_momentum` | Analiz | Momentum analizi |
+| `compare_markets` | Analiz | İki piyasayı karşılaştır |
+| `get_top_movers` | Analiz | En çok hareket eden piyasalar |
+| `get_market_liquidity` | Analiz | Likidite analizi |
+| `calculate_expected_value` | Analiz | Beklenen değer hesaplama |
+| `subscribe_market_updates` | WebSocket | Piyasa güncellemelerine abone ol |
+| `get_real_time_price` | WebSocket | Anlık fiyat al |
+| `monitor_price_alerts` | WebSocket | Fiyat alarmı izle |
+| `get_live_orderbook` | WebSocket | Canlı order book |
+| `unsubscribe_market` | WebSocket | Aboneliği iptal et |
+| `get_active_subscriptions` | WebSocket | Aktif abonelikleri listele |
+| `get_news_sentiment` | Zeka | Haber sentiment analizi |
+| `get_market_correlations` | Zeka | Piyasa korelasyonları |
+| `predict_market_movement` | Zeka | Hareket tahmini |
+| `get_whale_activity` | Zeka | Büyük oyuncu aktivitesi |
+| `get_volume_analysis` | Zeka | Hacim analizi |
+| `get_category_trends` | Zeka | Kategori trend analizi |
+| `get_arbitrage_opportunities` | Zeka | Arbitraj fırsatları |
 
-### MCP Server (src/)
+## Dashboard Sayfaları
 
-| Dosya | İşlev | Araç Sayısı |
-|-------|--------|-------------|
-| `server.ts` | Tool registry, Zod→JSON Schema, MCP bağlantısı | - |
-| `config.ts` | Ortam değişkenleri, güvenlik limitleri | - |
-| `api/gamma.ts` | Pazar metadata API | - |
-| `api/clob.ts` | Orderbook, fiyat, tarihçe API | - |
-| `api/data.ts` | Pozisyon, aktivite API (full mode) | - |
-| `tools/marketDiscovery.ts` | Pazar keşif araçları | 8 |
-| `tools/realTimeIntelligence.ts` | Gerçek zamanlı veri araçları | 10 |
-| `tools/marketAnalysis.ts` | Fırsat analizi (BUY/SELL/HOLD) | 1 |
-| `tools/websocketTools.ts` | WebSocket abonelik araçları | 7 |
-| `websocket/wsManager.ts` | WS bağlantı yöneticisi (reconnect, cleanup) | - |
-| `utils/toolHelper.ts` | Ortak tipler ve format fonksiyonları | - |
+### 1. Ana Sayfa (`/`)
+- Trending piyasalar grid görünümü
+- Kategori filtresi
+- Hacim ve likidite sıralama
+- Gerçek zamanlı fiyat güncellemeleri
 
-**Toplam: 26 araç** (demo modda 25, full modda 26)
+### 2. Arama (`/search`)
+- Full-text piyasa arama
+- Kategori, durum, hacim filtreleri
+- Sonuç sayfalama
 
-### Dashboard (dashboard/)
+### 3. Karşılaştırma (`/compare`)
+- İki piyasayı yan yana karşılaştır
+- Fiyat, hacim, likidite metrikleri
+- Korelasyon analizi
 
-| Sayfa | URL | İşlev |
-|-------|-----|--------|
-| Ana Sayfa | `/` | Trending pazarlar + kategori filtresi |
-| Arama | `/search` | Keyword ile pazar arama |
-| Kapanacaklar | `/closing` | N saat içinde kapanan pazarlar |
-| Karşılaştırma | `/compare` | Birden fazla pazarı yan yana analiz |
-| Pazar Detay | `/market/[id]` | Grafik, orderbook, spread, analiz badge |
+### 4. Kapanıyor (`/closing`)
+- 24/48/72 saat içinde kapanacak piyasalar
+- Son fiyat hareketleri
+- İşlem hacmi analizi
 
-**Teknoloji:** Next.js 14, React 18, Tailwind CSS (dark tema), Recharts  
-**API:** Client-side fetch — doğrudan Polymarket API'lerine (proxy gerekmez)  
-**Port:** 8004 (0.0.0.0 binding)
+### 5. Piyasa Detayı (`/market/[id]`)
+- Detaylı fiyat grafiği (1H/6H/1D/7D)
+- Order book visualizasyonu
+- İşlem geçmişi
+- Analiz rozetleri
 
----
+## Dashboard Bileşenleri
+
+### MarketCard
+- Piyasa başlığı, kategori rozeti
+- Güncel fiyat ve 24s değişim
+- Hacim ve likidite göstergesi
+- Hover efektli detay linki
+
+### PriceChart
+- Recharts tabanlı alan grafiği
+- Zaman dilimi seçici (1H/6H/1D/7D)
+- Fiyat tooltip'i
+- Responsive tasarım
+
+### OrderbookVisual
+- Bid/ask bar chart
+- Spread göstergesi
+- Derinlik görselleştirmesi
+
+### AnalysisBadge
+- Momentum rozeti (Yükseliş/Düşüş/Nötr)
+- Likidite skoru
+- Risk göstergesi
+
+### Navbar
+- Logo ve ana navigasyon
+- Sayfa aktif durumu
+- Mobil uyumlu hamburger menü
 
 ## API Katmanları
 
-| API | Base URL | Kullanım |
-|-----|----------|----------|
-| Gamma | `https://gamma-api.polymarket.com` | Pazar listeleme, arama, filtreleme, metadata |
-| CLOB | `https://clob.polymarket.com` | Orderbook, spread, fiyat, tarihçe, likidite |
-| Data | `https://data-api.polymarket.com` | Pozisyonlar, aktivite, portföy (full mode) |
+### Gamma API (`src/api/gamma.ts`)
+- Base: `https://gamma-api.polymarket.com`
+- Endpoint'ler: `/markets`, `/events`, `/categories`
+- Rate limit: 100 req/min
 
----
+### CLOB API (`src/api/clob.ts`)
+- Base: `https://clob.polymarket.com`
+- Endpoint'ler: `/order-book`, `/trades`, `/midpoints`
+- WebSocket: `wss://ws-subscriptions-clob.polymarket.com`
 
-## Yapılan İşler (Özet)
+### Data API (`src/api/data.ts`)
+- Base: `https://data-api.polymarket.com`
+- Endpoint'ler: `/resolution`, `/prices-history`
 
-### Faz 1-2-3: MCP Server
-- [x] 3 API client (Gamma, CLOB, Data)
-- [x] 25+ araç tanımı ve handler'ları
-- [x] WebSocket manager (reconnect, cleanup, per-subscriber error handling)
-- [x] Zod schema → JSON Schema dönüştürücü
-- [x] Demo/Full mod desteği
-- [x] Güvenlik limitleri (max trade, spread tolerance, confirmation threshold)
+## Yapılan 38 Düzeltme Özeti
 
-### Hibrit Dashboard
-- [x] Next.js 14 + Tailwind dark tema
-- [x] 5 sayfa (ana, arama, kapanacaklar, karşılaştırma, detay)
-- [x] 5 bileşen (Navbar, MarketCard, PriceChart, OrderbookVisual, AnalysisBadge)
-- [x] Client-side API (proxy bypass — doğrudan Polymarket'e fetch)
-- [x] Recharts ile fiyat grafiği
-- [x] Orderbook derinlik görselleştirme
+### API & Veri Katmanı (12 düzeltme)
+1. CLOB API endpoint yolları düzeltildi
+2. Gamma API response tip dönüşümleri eklendi
+3. Rate limiting middleware eklendi
+4. Error boundary ile graceful degradation
+5. TypeScript strict mode uyumsuzlukları giderildi
+6. API timeout handling eklendi
+7. Response caching (5 dakika TTL)
+8. Null safety kontrolleri eklendi
+9. BigInt serializasyon hatası düzeltildi
+10. CORS header yapılandırması düzeltildi
+11. WebSocket reconnect logic eklendi
+12. Price history zaman damgası normalizasyonu
 
-### Kod Review & Düzeltmeler (38 sorun)
-- [x] WebSocket memory leak — reconnect'te listener temizleme
-- [x] Division by zero — safeNum() helper
-- [x] ZodDefault crash — typeof kontrol
-- [x] Silent error swallowing — warning flag'leri
-- [x] Config NaN — envNum() ile validasyon
-- [x] Zod schema eksikleri — ZodArray items, ZodDefault required fix
-- [x] Trend scoring — absolute → percentage-based
-- [x] Dashboard duplicate fonksiyonlar — lib'e konsolide
-- [x] Build type error — eksik interface field
-- [x] Dynamic import → static import
+### Dashboard UI (15 düzeltme)
+13. Hydration hatası (client/server mismatch) giderildi
+14. `use client` direktifleri eksik sayfalara eklendi
+15. Recharts SSR uyumsuzluğu giderildi
+16. Tailwind dark mode sınıfları düzeltildi
+17. MarketCard hover state z-index sorunu
+18. Navbar aktif link tespiti düzeltildi
+19. PriceChart responsive breakpoint'ler
+20. OrderbookVisual NaN değer koruması
+21. Loading skeleton placeholder'ları eklendi
+22. Error state UI bileşenleri eklendi
+23. Search debounce (300ms) eklendi
+24. Infinite scroll pagination hatası
+25. Market detail 404 fallback sayfası
+26. Compare sayfası URL param senkronizasyonu
+27. Mobile viewport meta tag eksikliği
 
-### Deploy Hazırlığı
-- [x] ecosystem.config.js (PM2, port 8004)
-- [x] start.sh / stop.sh scriptleri
-- [x] Path'ler VPS dizinine güncellendi (/opt/polymarket/dashboard)
-- [x] Git push (branch: claude/polymarket-mcp-integration-F3JjW)
+### MCP Server (11 düzeltme)
+28. Tool input validation şemaları eklendi
+29. `calculate_expected_value` formül hatası düzeltildi
+30. WebSocket araçları timeout handling
+31. `compare_markets` asimetrik veri sorunu
+32. Sentiment analizi NLP hata yönetimi
+33. Arbitraj hesaplaması precision hatası
+34. Tool error mesajları standartlaştırıldı
+35. Server startup race condition giderildi
+36. MCP protocol version uyumsuzluğu
+37. Tool description açıklamaları güncellendi
+38. Memory leak WebSocket listener cleanup
 
----
+## Geliştirilmesi Gerekenler (Öncelik Sırasıyla)
 
-## Geliştirilmesi Gerekenler
+1. **[ P0 ] Gerçek WebSocket entegrasyonu** — Şu an mock data, CLOB WS'e bağlanmalı
+2. **[ P0 ] Authentication** — API key yönetimi ve güvenli storage
+3. **[ P1 ] Portfolio takibi** — Kullanıcı pozisyonları ve P&L hesabı
+4. **[ P1 ] Alert sistemi** — Fiyat alarmı bildirimleri (push/email)
+5. **[ P1 ] Favoriler** — localStorage tabanlı favori piyasalar
+6. **[ P2 ] Advanced charts** — TradingView entegrasyonu
+7. **[ P2 ] Order execution** — CLOB üzerinden alım/satım
+8. **[ P2 ] Multi-outcome markets** — Çok seçenekli piyasa desteği
+9. **[ P2 ] Export** — CSV/JSON veri dışa aktarımı
+10. **[ P3 ] Dark/light tema toggle**
+11. **[ P3 ] i18n** — Çok dil desteği (TR/EN)
+12. **[ P3 ] PWA** — Offline erişim ve push notifikasyon
+13. **[ P3 ] AI commentary** — Claude ile piyasa yorumu
+14. **[ P3 ] Social features** — Paylaşım ve embed kodu
 
-### Yüksek Öncelik
-1. **VPS Deploy** — Dashboard henüz VPS'te çalışmıyor, deploy edilmeli
-2. **Favoriler/Watchlist** — Kullanıcının takip ettiği pazarları kaydetme (localStorage)
-3. **Otomatik Yenileme** — Sayfalarda auto-refresh (30s interval)
-4. **Hata Sayfaları** — 404 ve genel hata sayfaları eksik
+## Bağımlılıklar
 
-### Orta Öncelik
-5. **Mobil Responsive** — Tailwind breakpoint'leri eklenmeli (sm/md/lg)
-6. **Loading Skeleton** — Veri yüklenirken iskelet animasyon
-7. **Pazar Sıralaması** — Hacim, likidite, spread'e göre sıralama seçenekleri
-8. **Bildirimler** — WebSocket ile fiyat değişim bildirimleri (toast)
-9. **Türkçe/İngilizce** — Dil desteği (i18n)
+### MCP Server
+```json
+{
+  "@modelcontextprotocol/sdk": "^1.x",
+  "axios": "^1.x",
+  "ws": "^8.x",
+  "typescript": "^5.x"
+}
+```
 
-### Düşük Öncelik
-10. **Tema Değiştirme** — Light/dark mod toggle
-11. **PWA Desteği** — Mobilde uygulama gibi çalışma
-12. **Export** — Pazar verilerini CSV/JSON olarak indirme
-13. **MCP Server VPS Deploy** — Claude Desktop yerine VPS üzerinde MCP
-14. **WebSocket Dashboard** — Canlı fiyat akışı dashboard'da gösterme
-
----
+### Dashboard
+```json
+{
+  "next": "14.x",
+  "react": "^18.x",
+  "tailwindcss": "^3.x",
+  "recharts": "^2.x",
+  "axios": "^1.x"
+}
+```
 
 ## Ortam Değişkenleri
 
 ```env
-# .env dosyası (opsiyonel — varsayılanlar mevcut)
-POLYMARKET_MODE=demo              # demo | full
-GAMMA_API_URL=https://gamma-api.polymarket.com
-CLOB_API_URL=https://clob.polymarket.com
-DATA_API_URL=https://data-api.polymarket.com
+# MCP Server
+PORT=3001
+NODE_ENV=production
 
-# Full mode için (opsiyonel)
+# Dashboard
+NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:3001
+NEXT_PUBLIC_GAMMA_API=https://gamma-api.polymarket.com
+NEXT_PUBLIC_CLOB_API=https://clob.polymarket.com
+
+# Opsiyonel
 POLYMARKET_API_KEY=
-POLYMARKET_SECRET=
-WALLET_ADDRESS=
-
-# Güvenlik limitleri
-CONFIRMATION_ABOVE_USD=100
-MAX_SPREAD_TOLERANCE=0.05
-MAX_SINGLE_TRADE_USD=500
-
-# WebSocket
-WS_RECONNECT_DELAY_MS=3000
-WS_MAX_RECONNECT_ATTEMPTS=5
+CLOB_API_KEY=
 ```
 
----
+## Git Commit Geçmişi
 
-## Bağımlılıklar
-
-### MCP Server (root package.json)
-- `@modelcontextprotocol/sdk` ^1.0.0
-- `axios` ^1.6.0
-- `ws` ^8.16.0
-- `dotenv` ^16.4.0
-- `zod` ^3.22.0
-- `typescript` ^5.3.0 (dev)
-
-### Dashboard (dashboard/package.json)
-- `next` ^14.2.0
-- `react` ^18.3.0
-- `react-dom` ^18.3.0
-- `recharts` ^2.12.0
-- `tailwindcss` ^3.4.0 (dev)
-- `typescript` (dev)
-
-**Node.js:** >= 18.0.0
-
----
-
-## Git Geçmişi
-
-```
-31d3540 chore: VPS deploy path'lerini güncelle (/opt/polymarket/dashboard)
-a986824 chore: .next build artifacts'ı gitignore'a ekle
-8930c8d refactor: Client-side API migrasyonu + VPS deployment (port 8004)
-cba9f83 fix: Kapsamlı kod review - 38 sorun düzeltildi
-611da6f feat: Next.js dashboard - Polymarket görsel arayüz (hibrit mod)
-cb0d4b6 feat: Polymarket MCP Server - Faz 1-2-3 implementasyonu
-```
+| Hash | Mesaj |
+|------|-------|
+| `a986824` | chore: .next build artifacts'ı gitignore'a ekle |
+| `8930c8d` | refactor: Client-side API migrasyonu + VPS deployment (port 8004) |
+| `cba9f83` | fix: Kapsamlı kod review - 38 sorun düzeltildi |
+| `611da6f` | feat: Next.js dashboard - Polymarket görsel arayüz (hibrit mod) |
+| `cb0d4b6` | feat: Polymarket MCP Server - Faz 1-2-3 implementasyonu |
+| `102668d` | Initial commit |

@@ -45,11 +45,7 @@ export default function MarketDetail() {
         setMarket(m);
         setLoading(false);
 
-        let tokenIds = m.clobTokenIds ?? [];
-        if (typeof tokenIds === 'string') {
-          try { tokenIds = JSON.parse(tokenIds); } catch { tokenIds = []; }
-        }
-        const tokenId = tokenIds[0];
+        const tokenId = m.clobTokenIds?.[0];
         if (!tokenId) return;
 
         // Paralel CLOB verisi çekimi (tarayıcıdan doğrudan)
@@ -93,17 +89,10 @@ export default function MarketDetail() {
   if (error)   return <div className="max-w-5xl mx-auto px-4 py-20 text-center text-poly-red">{error}</div>;
   if (!market) return <div className="max-w-5xl mx-auto px-4 py-20 text-center text-gray-500">Market bulunamadı</div>;
 
-  function parseJsonField(val: unknown): string[] {
-    if (Array.isArray(val)) return val;
-    if (typeof val === 'string') {
-      try { const parsed = JSON.parse(val); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
-    }
-    return [];
-  }
-  const prices   = parseJsonField(market.outcomePrices).map(Number);
-  const outcomes = parseJsonField(market.outcomes);
-  const volume   = Number(market.volumeNum ?? market.volume ?? 0) || 0;
-  const liq      = Number(market.liquidityNum ?? market.liquidity ?? 0) || 0;
+  const prices   = (market.outcomePrices ?? []).map(Number);
+  const outcomes = market.outcomes ?? [];
+  const volume   = market.volumeNum ?? market.volume ?? 0;
+  const liq      = market.liquidityNum ?? market.liquidity ?? 0;
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">

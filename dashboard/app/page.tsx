@@ -81,8 +81,8 @@ export default function Home() {
               question={m.question}
               outcomes={m.outcomes}
               outcomePrices={m.outcomePrices}
-              volume24hr={Number(m.volume24hr) || 0}
-              liquidity={Number(m.liquidityNum ?? m.liquidity) || 0}
+              volume24hr={m.volume24hr}
+              liquidity={m.liquidityNum ?? m.liquidity}
               endDate={m.endDate}
               image={m.image}
             />

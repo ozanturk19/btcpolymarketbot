@@ -1,223 +1,312 @@
-# VPS Deploy Prompt — Polymarket Dashboard
+# VPS Deploy Prompt — Polymarket MCP Dashboard
 
-Aşağıdaki prompt'u Claude Code ajanına ver. VPS'e SSH erişimi olan bir ortamda çalıştır.
+## Ajan Prompt'u (Kopyala-Yapıştır Hazır)
+
+Aşağıdaki prompt'u Claude Code veya herhangi bir AI ajanına verin:
 
 ---
 
-## PROMPT BAŞLANGIÇ
-
 ```
-Polymarket Dashboard'u VPS'e deploy et. Adımları kontrollü şekilde, her adımı doğrulayarak yap.
+Sen bir VPS deployment uzmanısın. Aşağıdaki 7 adımı sırayla, her adımda hata kontrolü yaparak gerçekleştir.
 
-## Bilgiler
-- VPS IP: 135.181.206.109
-- VPS kullanıcı: root
-- Repo: https://github.com/ozanturk19/claude.git
-- Branch: claude/polymarket-mcp-integration-F3JjW
-- Hedef dizin: /opt/polymarket
-- Dashboard dizini: /opt/polymarket/dashboard
-- Port: 8004 (UFW'de zaten açık)
-- Sadece dashboard/ dizinini deploy et, src/ (MCP server) şimdilik gerekmez
+HEDEF: Polymarket MCP Dashboard'u VPS'e deploy et ve port 8004'te çalışır hale getir.
 
-## Adım 1: VPS'e SSH bağlan ve ortamı kontrol et
-ssh root@135.181.206.109
+REPO: https://github.com/ozanturk19/claude.git
+BRANCH: claude/polymarket-mcp-integration-F3JjW
 
-Kontrol edilecekler:
-- Node.js versiyonu (>= 18 gerekli): node -v
-- npm versiyonu: npm -v  
-- git kurulu mu: git --version
-- pm2 kurulu mu: pm2 --version
-- Port 8004 boş mu: ss -tlnp | grep 8004
+## ADIM 1: Sistem Hazırlığı
+```bash
+# Node.js 20+ kontrolü
+node --version || (curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs)
 
-Eğer Node.js 18+ yoksa:
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
+# PM2 global kurulum
+npm list -g pm2 || npm install -g pm2
 
-Eğer pm2 yoksa:
-npm install -g pm2
+# Git kontrolü
+git --version || sudo apt-get install -y git
+```
 
-Eğer git yoksa:
-apt install -y git
-
-Eğer port 8004 meşgulse:
-- Hangi servis kullandığını kontrol et (örn. paper_bot varsa durdur: systemctl stop paper-bot-api)
-- fuser -k 8004/tcp ile portu serbest bırak
-
-## Adım 2: Repo'yu klonla
-cd /opt
-git clone https://github.com/ozanturk19/claude.git polymarket
+## ADIM 2: Repo Klonlama
+```bash
+# Eğer dizin varsa güncelle, yoksa klonla
+if [ -d "/opt/polymarket" ]; then
+  cd /opt/polymarket && git fetch origin && git checkout claude/polymarket-mcp-integration-F3JjW && git pull
+else
+  git clone -b claude/polymarket-mcp-integration-F3JjW https://github.com/ozanturk19/claude.git /opt/polymarket
+fi
 cd /opt/polymarket
-git checkout claude/polymarket-mcp-integration-F3JjW
+```
 
-Eğer /opt/polymarket zaten varsa:
-cd /opt/polymarket
-git fetch origin
-git checkout claude/polymarket-mcp-integration-F3JjW
-git pull origin claude/polymarket-mcp-integration-F3JjW
+## ADIM 3: Ortam Değişkenleri
+```bash
+# .env dosyası oluştur (yoksa)
+if [ ! -f ".env" ]; then
+  cp .env.example .env
+  echo "UYARI: .env dosyası oluşturuldu. Gerekliyse API anahtarlarını ekleyin."
+fi
 
-## Adım 3: Bağımlılıkları kur
-cd /opt/polymarket/dashboard
+# Dashboard .env
+cat > dashboard/.env.local << 'EOF'
+NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:3001
+NEXT_PUBLIC_GAMMA_API=https://gamma-api.polymarket.com
+NEXT_PUBLIC_CLOB_API=https://clob.polymarket.com
+EOF
+```
+
+## ADIM 4: Bağımlılık Kurulumu
+```bash
+# MCP Server bağımlılıkları
 npm install
 
-Doğrula: node_modules/ dizini oluştu mu, hata var mı kontrol et.
+# Dashboard bağımlılıkları
+cd dashboard && npm install && cd ..
 
-## Adım 4: Build et
-cd /opt/polymarket/dashboard
-npm run build
-
-Doğrula: .next/ dizini oluştu mu, build hatasız tamamlandı mı kontrol et.
-
-Eğer build hatası alırsan:
-- Hata mesajını oku ve düzelt
-- Genellikle tip hataları veya eksik bağımlılıklar olur
-- npm run build 2>&1 ile detaylı hata gör
-
-## Adım 5: PM2 ile başlat
-cd /opt/polymarket/dashboard
-pm2 delete polymarket-dashboard 2>/dev/null || true
-pm2 start ecosystem.config.js
-pm2 save
-pm2 startup
-
-ecosystem.config.js zaten doğru path'e ayarlı (/opt/polymarket/dashboard).
-
-## Adım 6: Doğrula
-sleep 3
-
-# Port dinleniyor mu?
-ss -tlnp | grep 8004
-
-# Localhost'tan erişilebilir mi?
-curl -s -o /dev/null -w '%{http_code}' http://localhost:8004
-
-# Dışarıdan erişilebilir mi?
-curl -s -o /dev/null -w '%{http_code}' http://135.181.206.109:8004
-
-# PM2 durumu
-pm2 status
-
-Beklenen sonuçlar:
-- Port 8004 LISTEN durumda
-- HTTP 200 yanıtı
-- PM2'de "polymarket-dashboard" online
-
-Eğer çalışmıyorsa:
-- pm2 logs polymarket-dashboard --lines 50 ile logları kontrol et
-- Hata varsa düzelt ve pm2 restart polymarket-dashboard yap
-
-## Adım 7: Firewall kontrolü
-ufw status | grep 8004
-
-Eğer 8004 yoksa:
-ufw allow 8004
-ufw reload
-
-## Önemli Notlar
-- MCP server (src/) kısmını deploy ETME, sadece dashboard
-- Mevcut servislere (paper_bot vb.) dokunma, sadece port çakışması varsa bildir
-- Her adımdan sonra sonucu doğrula, hata varsa logları kontrol et
-- Dashboard client-side API kullanıyor, proxy ayarı gerekmez
-- .env dosyası gerekmez, dashboard varsayılan API URL'lerini kullanıyor
+# TypeScript derleme
+npm run build 2>&1 | tail -20
 ```
 
-## PROMPT BİTİŞ
+## ADIM 5: Dashboard Build
+```bash
+cd dashboard
+
+# Next.js production build
+npm run build 2>&1 | tail -30
+
+if [ $? -ne 0 ]; then
+  echo "HATA: Dashboard build başarısız. Loglara bakın."
+  exit 1
+fi
+
+cd ..
+```
+
+## ADIM 6: PM2 ile Başlatma
+```bash
+# Mevcut süreçleri durdur
+pm2 delete polymarket-mcp 2>/dev/null || true
+pm2 delete polymarket-dashboard 2>/dev/null || true
+
+# MCP Server başlat (port 3001)
+pm2 start npm --name "polymarket-mcp" -- run start -- --port 3001
+
+# Dashboard başlat (port 8004)
+cd dashboard
+pm2 start npm --name "polymarket-dashboard" -- run start -- --port 8004
+cd ..
+
+# PM2 startup kaydet
+pm2 save
+pm2 startup 2>&1 | tail -5
+```
+
+## ADIM 7: Sağlık Kontrolü
+```bash
+sleep 5
+
+# MCP Server kontrolü
+curl -s http://localhost:3001/health | python3 -m json.tool || echo "MCP Server yanıt vermiyor"
+
+# Dashboard kontrolü
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8004 | grep -q "200" && \
+  echo "✓ Dashboard port 8004'te çalışıyor" || \
+  echo "✗ Dashboard başlatılamadı"
+
+# PM2 durum
+pm2 status
+
+# Firewall (ufw varsa)
+sudo ufw allow 8004/tcp 2>/dev/null || true
+sudo ufw allow 3001/tcp 2>/dev/null || true
+
+echo ""
+echo "=== DEPLOY TAMAMLANDI ==="
+echo "Dashboard: http://$(curl -s ifconfig.me):8004"
+echo "MCP Server: http://$(curl -s ifconfig.me):3001"
+```
+
+Her adımda çıktıyı kontrol et. Hata varsa devam etmeden önce bildir.
+```
 
 ---
 
-## Alternatif: Tek Script ile Deploy
+## Bash Script Alternatifi (Tek Seferde Çalıştır)
 
-Eğer prompt yerine direkt bir script çalıştırmak istersen, VPS'te şunu çalıştır:
+VPS'e SSH ile bağlandıktan sonra tek komutla deploy:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ozanturk19/claude/claude/polymarket-mcp-integration-F3JjW/deploy.sh | bash
+```
+
+Veya yerel script olarak:
 
 ```bash
 #!/bin/bash
 set -e
 
-echo "=== 1/7 Ortam Kontrolü ==="
-echo "Node: $(node -v 2>/dev/null || echo 'YOK')"
-echo "npm: $(npm -v 2>/dev/null || echo 'YOK')"
-echo "git: $(git --version 2>/dev/null || echo 'YOK')"
-echo "pm2: $(pm2 --version 2>/dev/null || echo 'YOK')"
+echo "=== Polymarket Dashboard Deploy ==="
 
-# Node.js yoksa kur
-if ! command -v node &> /dev/null; then
-    echo "Node.js kuruluyor..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    apt-get install -y nodejs
-fi
+# Renkler
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# pm2 yoksa kur
-if ! command -v pm2 &> /dev/null; then
-    echo "pm2 kuruluyor..."
-    npm install -g pm2
-fi
+log() { echo -e "${GREEN}[✓]${NC} $1"; }
+warn() { echo -e "${YELLOW}[!]${NC} $1"; }
+err() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
-echo ""
-echo "=== 2/7 Port Kontrolü ==="
-if ss -tlnp | grep -q ':8004'; then
-    echo "UYARI: Port 8004 kullanımda!"
-    ss -tlnp | grep ':8004'
-    echo "Serbest bırakılıyor..."
-    fuser -k 8004/tcp 2>/dev/null || true
-    sleep 2
-fi
-echo "Port 8004 boş"
+# 1. Node.js
+log "Node.js kontrol ediliyor..."
+node --version 2>/dev/null | grep -qE "v(18|20|22)" || {
+  warn "Node.js 20 kuruluyor..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+}
 
-echo ""
-echo "=== 3/7 Repo Klonlama ==="
-if [ -d "/opt/polymarket" ]; then
-    echo "Mevcut repo güncelleniyor..."
-    cd /opt/polymarket
-    git fetch origin
-    git checkout claude/polymarket-mcp-integration-F3JjW
-    git pull origin claude/polymarket-mcp-integration-F3JjW
+# 2. PM2
+log "PM2 kontrol ediliyor..."
+npm list -g pm2 &>/dev/null || npm install -g pm2
+
+# 3. Repo
+log "Repo klonlanıyor/güncelleniyor..."
+DEPLOY_DIR="/opt/polymarket"
+if [ -d "$DEPLOY_DIR/.git" ]; then
+  cd "$DEPLOY_DIR"
+  git fetch origin
+  git checkout claude/polymarket-mcp-integration-F3JjW
+  git pull origin claude/polymarket-mcp-integration-F3JjW
 else
-    cd /opt
-    git clone https://github.com/ozanturk19/claude.git polymarket
-    cd /opt/polymarket
-    git checkout claude/polymarket-mcp-integration-F3JjW
+  git clone -b claude/polymarket-mcp-integration-F3JjW \
+    https://github.com/ozanturk19/claude.git "$DEPLOY_DIR"
+  cd "$DEPLOY_DIR"
 fi
-echo "Repo hazır"
 
-echo ""
-echo "=== 4/7 npm install ==="
-cd /opt/polymarket/dashboard
-npm install
-echo "Bağımlılıklar kuruldu"
+# 4. Env
+[ -f ".env" ] || cp .env.example .env
+cat > dashboard/.env.local << 'EOF'
+NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:3001
+NEXT_PUBLIC_GAMMA_API=https://gamma-api.polymarket.com
+NEXT_PUBLIC_CLOB_API=https://clob.polymarket.com
+EOF
 
-echo ""
-echo "=== 5/7 Build ==="
-npm run build
-echo "Build tamamlandı"
+# 5. Bağımlılıklar
+log "Bağımlılıklar kuruluyor..."
+npm install --production 2>&1 | tail -5
+cd dashboard && npm install 2>&1 | tail -5 && cd ..
 
-echo ""
-echo "=== 6/7 PM2 Başlat ==="
-pm2 delete polymarket-dashboard 2>/dev/null || true
-pm2 start ecosystem.config.js
+# 6. Build
+log "Dashboard build ediliyor..."
+cd dashboard
+npm run build 2>&1 | tail -10
+[ $? -eq 0 ] || err "Build başarısız!"
+cd ..
+
+# 7. PM2
+log "Servisler başlatılıyor..."
+pm2 delete polymarket-mcp polymarket-dashboard 2>/dev/null || true
+pm2 start npm --name "polymarket-mcp" -- run start -- --port 3001
+cd dashboard
+pm2 start npm --name "polymarket-dashboard" -- run start -- --port 8004
+cd ..
 pm2 save
-echo "PM2 başlatıldı"
 
+# 8. Firewall
+sudo ufw allow 8004/tcp 2>/dev/null || true
+sudo ufw allow 3001/tcp 2>/dev/null || true
+
+# 9. Kontrol
+sleep 8
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8004)
+[ "$HTTP_STATUS" = "200" ] && log "Dashboard çalışıyor!" || warn "Dashboard yanıt vermiyor (status: $HTTP_STATUS)"
+
+VPS_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 echo ""
-echo "=== 7/7 Doğrulama ==="
-sleep 3
-echo "Port durumu:"
-ss -tlnp | grep 8004 || echo "HATA: Port 8004 dinlenmiyor!"
+echo "=============================="
+log "DEPLOY BAŞARILI"
+echo "Dashboard : http://$VPS_IP:8004"
+echo "MCP Server: http://$VPS_IP:3001"
+echo "PM2 Durum : pm2 status"
+echo "Loglar    : pm2 logs polymarket-dashboard"
+echo "=============================="
+```
 
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8004)
-echo "HTTP Status: $HTTP_CODE"
+---
 
-echo ""
-pm2 status
+## Hata Senaryoları ve Çözümler
 
-if [ "$HTTP_CODE" = "200" ]; then
-    echo ""
-    echo "========================================="
-    echo "  BASARILI! Dashboard hazir"
-    echo "  http://135.181.206.109:8004"
-    echo "========================================="
-else
-    echo ""
-    echo "HATA: Dashboard yanit vermiyor (HTTP $HTTP_CODE)"
-    echo "Loglar:"
-    pm2 logs polymarket-dashboard --lines 20 --nostream
-fi
+### Port Çakışması
+```bash
+# Port 8004'ü kullanan süreci bul ve sonlandır
+sudo lsof -ti:8004 | xargs sudo kill -9 2>/dev/null || true
+sudo lsof -ti:3001 | xargs sudo kill -9 2>/dev/null || true
+```
+
+### Node.js Versiyon Uyumsuzluğu
+```bash
+# nvm ile doğru versiyonu kullan
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+source ~/.bashrc
+nvm install 20
+nvm use 20
+nvm alias default 20
+```
+
+### Build Bellek Hatası (ENOMEM)
+```bash
+# Swap dosyası ekle
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+# Sonra build tekrar dene
+cd dashboard && npm run build
+```
+
+### PM2 Servis Başlamıyor
+```bash
+# Logları kontrol et
+pm2 logs polymarket-dashboard --lines 50
+
+# Manuel test
+cd /opt/polymarket/dashboard
+node_modules/.bin/next start -p 8004
+```
+
+### Nginx Reverse Proxy (Opsiyonel)
+```nginx
+# /etc/nginx/sites-available/polymarket
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://localhost:8004;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    location /mcp/ {
+        proxy_pass http://localhost:3001/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+---
+
+## Güncelleme (Sonraki Deploy'lar)
+
+```bash
+cd /opt/polymarket
+git pull origin claude/polymarket-mcp-integration-F3JjW
+cd dashboard && npm install && npm run build && cd ..
+pm2 restart all
 ```
