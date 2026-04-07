@@ -3,7 +3,7 @@ module.exports = {
     name: 'polymarket-dashboard',
     script: 'node_modules/.bin/next',
     args: 'start -p 8004 -H 0.0.0.0',
-    cwd: '/home/user/claude/dashboard',
+    cwd: '/opt/polymarket/dashboard',
     env: {
       NODE_ENV: 'production',
       PORT: 8004,

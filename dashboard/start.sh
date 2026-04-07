@@ -1,6 +1,6 @@
 #!/bin/bash
 # Polymarket Dashboard - Port 8004
-cd /home/user/claude/dashboard
+cd /opt/polymarket/dashboard
 
 # Proxy env'lerini temizle (VPS proxy kısıtlaması - client-side fetch kullandığımız için gerekli değil)
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
