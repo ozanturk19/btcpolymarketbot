@@ -9,13 +9,15 @@ async function fetchJson(url: string) {
 
 // ── Gamma API ────────────────────────────────────────────────────────────────
 
+const ACTIVE_FILTER = 'active=true&closed=false&archived=false';
+
 export async function searchMarkets(query: string, limit = 20) {
-  const data = await fetchJson(`${GAMMA}/markets?search=${encodeURIComponent(query)}&limit=${limit}&active=true`);
+  const data = await fetchJson(`${GAMMA}/markets?search=${encodeURIComponent(query)}&limit=${limit}&${ACTIVE_FILTER}`);
   return normalize(data);
 }
 
 export async function getTrendingMarkets(limit = 20) {
-  const data = await fetchJson(`${GAMMA}/markets?order=volume24hr&ascending=false&active=true&limit=${limit}`);
+  const data = await fetchJson(`${GAMMA}/markets?order=volume24hr&ascending=false&${ACTIVE_FILTER}&limit=${limit}`);
   return normalize(data);
 }
 
@@ -23,13 +25,14 @@ export async function getClosingSoon(hours = 24, limit = 20) {
   const now = new Date();
   const future = new Date(now.getTime() + hours * 3_600_000);
   const data = await fetchJson(
-    `${GAMMA}/markets?end_date_min=${now.toISOString()}&end_date_max=${future.toISOString()}&active=true&order=end_date&ascending=true&limit=${limit}`
+    `${GAMMA}/markets?end_date_min=${now.toISOString()}&end_date_max=${future.toISOString()}&${ACTIVE_FILTER}&order=end_date&ascending=true&limit=${limit}`
   );
   return normalize(data);
 }
 
 export async function getMarketsByCategory(category: string, limit = 20) {
-  const data = await fetchJson(`${GAMMA}/markets?tag_slug=${encodeURIComponent(category)}&active=true&limit=${limit}`);
+  // Polymarket uses multiple tag field names; try tag_slug first
+  const data = await fetchJson(`${GAMMA}/markets?tag_slug=${encodeURIComponent(category)}&${ACTIVE_FILTER}&order=volume24hr&ascending=false&limit=${limit}`);
   return normalize(data);
 }
 
