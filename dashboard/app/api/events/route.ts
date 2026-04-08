@@ -29,17 +29,18 @@ export async function GET(req: NextRequest) {
     const events = await res.json();
     const list = Array.isArray(events) ? events : events?.data ?? [];
 
-    // Her event'ten marketleri düzleştir, event meta verisini market'e aktar
+    // Her event'ten marketleri düzleştir, kapalı/arşivlenenler filtrele
     const markets = list.flatMap((event: Record<string, unknown>) => {
       const eventMarkets = (event.markets as Record<string, unknown>[]) ?? [];
-      return eventMarkets.map(m => parseMarket({
-        ...m,
-        // Event-level alanları eksik olanlara aktar
-        liquidityNum: m.liquidityNum ?? event.liquidityClob ?? event.liquidity,
-        volume24hr: m.volume24hr ?? event.volume24hr,
-        eventTitle: event.title,
-        eventSlug: event.slug,
-      }, event.image as string || event.icon as string));
+      return eventMarkets
+        .filter(m => m.closed !== true && m.archived !== true && m.active !== false)
+        .map(m => parseMarket({
+          ...m,
+          liquidityNum: m.liquidityNum ?? event.liquidityClob ?? event.liquidity,
+          volume24hr: m.volume24hr ?? event.volume24hr,
+          eventTitle: event.title,
+          eventSlug: event.slug,
+        }, event.image as string || event.icon as string));
     });
 
     // Volume'a göre sırala

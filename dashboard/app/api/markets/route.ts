@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
     const res = await fetch(url, { next: { revalidate: 30 } });
     if (!res.ok) return NextResponse.json({ error: `Gamma API error: ${res.status}` }, { status: res.status });
     const data = await res.json();
-    const parsed = Array.isArray(data) ? data.map(parseMarket) : data;
+    const parsed = Array.isArray(data)
+      ? data.filter(m => m.closed !== true && m.archived !== true).map(parseMarket)
+      : data;
     return NextResponse.json(parsed);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
