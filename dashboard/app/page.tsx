@@ -41,6 +41,7 @@ export default function Home() {
     { slug: 'crypto',      label: 'Kripto' },
     { slug: 'pop-culture', label: 'Kültür' },
     { slug: 'economics',   label: 'Ekonomi' },
+    { slug: 'weather',     label: 'Hava' },
   ];
 
   return (
