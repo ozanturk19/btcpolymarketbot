@@ -35,8 +35,9 @@ export async function getClosingSoon(hours = 24, limit = 20) {
 }
 
 export async function getMarketsByCategory(category: string, limit = 20) {
+  // /markets?tag_slug çalışmıyor — events endpoint üzerinden çek, marketleri flatten et
   const data = await fetchJson(
-    `${API}/markets?tag_slug=${encodeURIComponent(category)}&${ACTIVE_FILTER}&order=volume24hr&ascending=false&limit=${limit}`
+    `${API}/events?tag_slug=${encodeURIComponent(category)}&active=true&limit=${limit}&order=volume24hr&ascending=false`
   );
   return normalize(data);
 }

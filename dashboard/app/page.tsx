@@ -35,12 +35,12 @@ export default function Home() {
   }, [category]);
 
   const categories = [
-    { slug: 'all', label: 'Tümü' },
-    { slug: 'politics', label: 'Politika' },
-    { slug: 'sports', label: 'Spor' },
-    { slug: 'crypto', label: 'Kripto' },
-    { slug: 'culture', label: 'Kültür' },
-    { slug: 'economics', label: 'Ekonomi' },
+    { slug: 'all',         label: 'Tümü' },
+    { slug: 'politics',    label: 'Politika' },
+    { slug: 'sports',      label: 'Spor' },
+    { slug: 'crypto',      label: 'Kripto' },
+    { slug: 'pop-culture', label: 'Kültür' },
+    { slug: 'economics',   label: 'Ekonomi' },
   ];
 
   return (
