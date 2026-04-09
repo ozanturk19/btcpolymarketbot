@@ -25,6 +25,7 @@ export interface BtcMarket {
   volume24h: number;
   liquidity: number;
   acceptingOrders: boolean;
+  outcome: 'UP' | 'DOWN' | null;
 }
 
 /** Başlıktan süreyi dakika cinsinden çıkar */
@@ -84,6 +85,7 @@ function parseMarket(m: Record<string, unknown>): BtcMarket | null {
     volume24h:      Number(m.volume24hr ?? 0),
     liquidity:      Number(m.liquidity ?? 0),
     acceptingOrders: (m.acceptingOrders as boolean) ?? false,
+    outcome:        null,
   };
 }
 
