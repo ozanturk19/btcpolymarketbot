@@ -94,7 +94,7 @@ export async function fetchActiveMarkets(durationFilter?: number[]): Promise<Btc
   const now = Math.floor(Date.now() / 1000);
 
   const res = await axios.get(`${GAMMA}/events`, {
-    params: { tag_slug: 'bitcoin', active: true, limit: 100, order: 'end_date', ascending: true },
+    params: { tag_slug: 'bitcoin', active: true, limit: 100, order: 'volume24hr', ascending: false },
     headers: { 'User-Agent': 'Mozilla/5.0' },
     timeout: 10000,
   });
