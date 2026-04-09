@@ -1,0 +1,27 @@
+{
+  "name": "polymarket-btc-bot",
+  "version": "1.0.0",
+  "description": "BTC Up/Down market observer + paper trader",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node index.ts",
+    "observe": "ts-node index.ts --mode=observe",
+    "paper": "ts-node index.ts --mode=paper",
+    "report": "ts-node index.ts --mode=report"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "better-sqlite3": "^9.4.3",
+    "ws": "^8.16.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
