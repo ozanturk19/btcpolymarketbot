@@ -168,7 +168,7 @@ async function main(): Promise<void> {
             acceptingOrders: false,
           };
           if (MODE === 'paper' || MODE === 'both') resolveScalpTrades(db, mkt);
-          if (MODE === 'live' || MODE === 'both') resolveScalpLive(db, mkt);
+          if (MODE === 'live' || MODE === 'both') await resolveScalpLive(db, mkt);
         }
         // WIN tokenları otomatik redeem et (live modda)
         if (MODE === 'live' || MODE === 'both') {

@@ -10,12 +10,14 @@
  *   - feeRateBps: 0      — GTC maker emirleri için
  *
  * Flow:
- *   sinyal → FOK BUY @ ask  → OPEN kaydı + hemen GTC SELL @ 0.99
- *   stop tetiklenir         → mevcut SELL iptal + kademeli FOK SELL denemeleri
+ *   sinyal → FOK BUY @ ask  → OPEN kaydı + hemen GTC SELL @ 0.99 (target)
+ *                           + hemen GTC SELL @ stop_price (stop order)
+ *   stop tetiklenir         → GTC stop dolu mu kontrol et; dolmadıysa iptal + FOK cascade
  *   settlement              → Polymarket otomatik ödeme (WIN=1.00, LOSS=0.00)
  *
- * Stop Loss Güvencesi:
- *   FOK stop emri 4 kademeli fiyatla denenir (hepsi mid-relative):
+ * Stop Loss Güvencesi (2 katmanlı):
+ *   1. GTC maker SELL @ stop_price — fiyat oraya gelince otomatik dolar (slippage yok)
+ *   2. FOK cascade fallback — crash/gap durumunda 4 kademeli fiyat:
  *     1. mid - 0.01  (mid'e en yakın, spread dar ise dolar)
  *     2. mid - 0.03  (büyük olasılıkla dolar)
  *     3. mid - 0.06  (agresif, neredeyse garantili)
@@ -51,6 +53,7 @@ function insertLiveTrade(
   tokenId: string,
   entryOrderId: string,
   exitOrderId: string | null,
+  stopOrderId: string | null,   // ← NEW: GTC stop order ID
   shares: number,
   entryPrice: number,
   stopPrice: number,
@@ -58,12 +61,12 @@ function insertLiveTrade(
   const now = Math.floor(Date.now() / 1000);
   db.prepare(`
     INSERT INTO live_trades
-      (market_id, token_id, side, entry_order_id, exit_order_id,
+      (market_id, token_id, side, entry_order_id, exit_order_id, stop_order_id,
        shares, entry_price, entry_ts, target_price, stop_price, size_usd, outcome)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,'OPEN')
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'OPEN')
   `).run(
     market.id, tokenId, side,
-    entryOrderId, exitOrderId,
+    entryOrderId, exitOrderId, stopOrderId,
     shares, entryPrice, now,
     TARGET, stopPrice, SIZE_USD,
   );
@@ -89,7 +92,7 @@ function parseBalanceFromError(errMsg: string): number | null {
 
 /**
  * Her snapshot'ta çağrılır.
- * Şart sağlanırsa FOK BUY atar, fill olursa GTC SELL koyar.
+ * Şart sağlanırsa FOK BUY atar, fill olursa GTC SELL (target) + GTC SELL (stop) koyar.
  */
 export async function checkScalpLive(
   db: Db,
@@ -126,9 +129,9 @@ export async function checkScalpLive(
 
     // --- Sipariş ver ---
     const entryPrice = roundTick(ask);  // 0.01 tick'e yuvarla
-    // Shares: CLOB kuralı — integer shares kullan, minimum 5.
-    // Tam sayı kullanıldığında price×size daima 2 ondalıkla temsil edilebilir.
-    const shares = Math.max(5, Math.round(SIZE_USD / entryPrice));
+    // Shares: +1 ekle → fee sonrası (×0.98) ≥5 garantili, GTC stop için minimum 5 sağlanır.
+    // Örn: 0.92'de: 6 × 0.98 = 5.88 → GTC stop @ stop_price için yeterli.
+    const shares = Math.max(6, Math.round(SIZE_USD / entryPrice) + 1);  // +1 → fee sonrası ≥5 garantili
     const stopPrice  = roundTick(entryPrice - STOP_DIST);
     const fee        = entryPrice * shares * TAKER_FEE;
 
@@ -163,7 +166,7 @@ export async function checkScalpLive(
       console.log(`[live] ✅ BUY FILL @${entryPrice} | order=${entryOrderId.slice(0,10)}... | filled=${sizeMatched}`);
 
       // SELL — GTC limit @ target (maker, ücretsiz)
-      // Not: CLOB taker fee sonrası bakiye shares'tan az olabilir (örn. 5 → 4.97).
+      // Not: CLOB taker fee sonrası bakiye shares'tan az olabilir (örn. 6 → 5.88).
       // Önce shares ile dene; "not enough balance" alırsak hata mesajından bakiyeyi parse et ve tekrar dene.
       let exitOrderId: string | null = null;
       try {
@@ -205,8 +208,28 @@ export async function checkScalpLive(
         console.warn(`[live] SELL LIMIT hatası: ${e.message}`);
       }
 
+      // GTC STOP emri: stop seviyesine maker order koy (alıcı bekliyoruz)
+      // FOK cascade'den çok daha iyi: fiyat oraya gelince otomatik dolar
+      let stopOrderId: string | null = null;
+      try {
+        const stopOrder = await client.createOrder(
+          { tokenID: tokenId, price: stopPrice, side: Side.SELL, size: 5, feeRateBps: GTC_FEE_BPS },
+          { tickSize: TICK_SIZE, negRisk: false },
+        );
+        const stopResult = await client.postOrder(stopOrder, OrderType.GTC);
+        const stopErr = (stopResult as any).error ?? (stopResult as any).errorMsg;
+        if (!stopErr) {
+          stopOrderId = (stopResult as any).orderID ?? null;
+          console.log(`[live] 🎯 GTC STOP @${stopPrice} set | order=${stopOrderId?.slice(0,10)}...`);
+        } else {
+          console.warn(`[live] GTC STOP kurulamadı: ${stopErr} — FOK cascade fallback aktif`);
+        }
+      } catch(e: any) {
+        console.warn(`[live] GTC STOP hatası: ${e.message}`);
+      }
+
       // DB'ye kaydet
-      insertLiveTrade(db, market, side, tokenId, entryOrderId, exitOrderId, shares, entryPrice, stopPrice);
+      insertLiveTrade(db, market, side, tokenId, entryOrderId, exitOrderId, stopOrderId, shares, entryPrice, stopPrice);
       break; // aynı tick'te tek taraf
 
     } catch(e: any) {
@@ -216,9 +239,9 @@ export async function checkScalpLive(
 }
 
 /**
- * Açık pozisyonları izle — stop tetiklenirse kademeli fiyatlarla sat.
+ * Açık pozisyonları izle — stop tetiklenirse önce GTC stop kontrol et, yoksa FOK cascade.
  *
- * Stop fiyat kademeleri (hepsi mid-relative, mümkün az kayıp):
+ * Stop fiyat kademeleri (FOK cascade, hepsi mid-relative, mümkün az kayıp):
  *   1. mid - 0.01  — mid'e en yakın, spread dar ise dolar
  *   2. mid - 0.03  — büyük ihtimalle dolar
  *   3. mid - 0.06  — agresif, neredeyse garantili
@@ -241,6 +264,7 @@ export async function updateScalpLive(
     shares: number; entry_price: number;
     target_price: number; stop_price: number;
     exit_order_id: string | null;
+    stop_order_id: string | null;  // ← NEW
   }[];
 
   if (!open.length) return;
@@ -259,7 +283,42 @@ export async function updateScalpLive(
     try {
       const client = await getClobClient();
 
-      // Önce mevcut SELL limitini iptal et (varsa)
+      // Önce GTC stop emrini kontrol et: zaten doldu mu?
+      if (t.stop_order_id) {
+        try {
+          const orderInfo = await client.getOrder(t.stop_order_id);
+          const status = (orderInfo as any).status;
+          const sizeMatched = parseFloat((orderInfo as any).size_matched ?? '0');
+          const makePrice = parseFloat((orderInfo as any).price ?? '0');
+
+          if (status === 'MATCHED' || sizeMatched > 0) {
+            // GTC stop emri zaten dolmuş — harika, stop_price'tan çıktık
+            const filledPrice = makePrice || roundTick(t.stop_price);
+            const fee = t.entry_price * sizeMatched * TAKER_FEE;
+            const pnl = (filledPrice - t.entry_price) * sizeMatched - fee;
+            db.prepare(`
+              UPDATE live_trades
+              SET exit_price=?, exit_ts=?, exit_reason='stop_gtc_filled',
+                  pnl=?, pnl_pct=?, outcome='LOSS'
+              WHERE id=?
+            `).run(filledPrice, now, pnl, ((filledPrice - t.entry_price) / t.entry_price) * 100, t.id);
+            console.log(`[live] ✅ GTC STOP önceden dolmuş @${filledPrice} | pnl=$${pnl.toFixed(3)}`);
+            continue;
+          }
+
+          // GTC dolmadı — iptal et ve FOK cascade yap
+          try {
+            await client.cancelOrder({ orderID: t.stop_order_id });
+            console.log(`[live] GTC STOP iptal edildi — FOK cascade başlıyor`);
+          } catch(e: any) {
+            console.warn(`[live] GTC STOP iptal uyarı: ${e.message}`);
+          }
+        } catch(e: any) {
+          console.warn(`[live] GTC STOP sorgu hatası: ${e.message} — FOK cascade devam`);
+        }
+      }
+
+      // Önce mevcut SELL limitini (target order) iptal et (varsa)
       if (t.exit_order_id) {
         try {
           await client.cancelOrder({ orderID: t.exit_order_id });
@@ -352,14 +411,14 @@ export async function updateScalpLive(
         WHERE id=?
       `).run(
         filledPrice, now,
-        `stop_attempt_${attemptIndex + 1}`,
+        `stop_fok_${attemptIndex + 1}`,
         pnl,
         ((filledPrice - t.entry_price) / t.entry_price) * 100,
         t.id,
       );
 
       console.log(
-        `[live] ✅ STOP çıkış ONAYLANDI @${filledPrice} (deneme ${attemptIndex + 1}) | pnl=$${pnl.toFixed(3)}`,
+        `[live] ✅ STOP çıkış ONAYLANDI @${filledPrice} (FOK deneme ${attemptIndex + 1}) | pnl=$${pnl.toFixed(3)}`,
       );
 
     } catch(e: any) {
@@ -372,7 +431,7 @@ export async function updateScalpLive(
  * Market kapandığında — açık pozisyonları kapat.
  * Polymarket otomatik settlement yapar (WIN→1.00, LOSS→0.00 per share)
  */
-export function resolveScalpLive(db: Db, market: BtcMarket): void {
+export async function resolveScalpLive(db: Db, market: BtcMarket): Promise<void> {
   if (!market.outcome) return;
 
   const now = Math.floor(Date.now() / 1000);
@@ -382,6 +441,7 @@ export function resolveScalpLive(db: Db, market: BtcMarket): void {
   `).all(market.id) as {
     id: number; side: string; shares: number;
     entry_price: number; stop_price: number;
+    stop_order_id: string | null;
   }[];
 
   for (const t of open) {
@@ -389,6 +449,18 @@ export function resolveScalpLive(db: Db, market: BtcMarket): void {
     const exitPrice = won ? 1.0 : 0.0;
     const fee       = t.entry_price * t.shares * TAKER_FEE;
     const pnl       = (exitPrice - t.entry_price) * t.shares - fee;
+
+    // WIN ise GTC stop order'ı iptal et (artık gerek yok)
+    if (won && t.stop_order_id) {
+      try {
+        const client = await getClobClient();
+        await client.cancelOrder({ orderID: t.stop_order_id });
+        console.log(`[live] ✅ GTC STOP iptal (WIN settlement)`);
+      } catch(e: any) {
+        // CLOB zaten iptal etmiş olabilir (market kapanınca)
+        console.warn(`[live] GTC STOP iptal uyarı (WIN): ${e.message}`);
+      }
+    }
 
     db.prepare(`
       UPDATE live_trades

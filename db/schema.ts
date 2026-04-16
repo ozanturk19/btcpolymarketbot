@@ -83,7 +83,7 @@ export function openDb(dbPath = path.join(__dirname, '../data/observer.db')): Da
       token_id        TEXT NOT NULL,        -- CLOB token ID (UP veya DOWN)
       side            TEXT NOT NULL,        -- 'UP' | 'DOWN'
       entry_order_id  TEXT,                 -- Polymarket BUY order ID
-      exit_order_id   TEXT,                 -- Polymarket SELL order ID (GTC limit)
+      exit_order_id   TEXT,                 -- Polymarket SELL order ID (GTC limit @ target)
       shares          REAL NOT NULL,        -- satın alınan share miktarı
       entry_price     REAL NOT NULL,        -- giriş fiyatı (ask)
       entry_ts        INTEGER NOT NULL,
@@ -92,7 +92,7 @@ export function openDb(dbPath = path.join(__dirname, '../data/observer.db')): Da
       size_usd        REAL NOT NULL,        -- harcanan USDC (~)
       exit_price      REAL,
       exit_ts         INTEGER,
-      exit_reason     TEXT,                 -- 'stop' | 'settlement_win' | 'settlement_loss'
+      exit_reason     TEXT,                 -- 'stop_gtc_filled' | 'stop_fok_N' | 'settlement_win' | 'settlement_loss'
       pnl             REAL,
       pnl_pct         REAL,
       outcome         TEXT DEFAULT 'OPEN'   -- 'OPEN' | 'WIN' | 'LOSS'
@@ -102,6 +102,13 @@ export function openDb(dbPath = path.join(__dirname, '../data/observer.db')): Da
 
     CREATE INDEX IF NOT EXISTS idx_markets_close    ON markets(close_time);
   `);
+
+  // Migration: stop_order_id kolonu ekle (yoksa)
+  const cols = (db.pragma('table_info(live_trades)') as any[]).map((c: any) => c.name);
+  if (!cols.includes('stop_order_id')) {
+    db.exec(`ALTER TABLE live_trades ADD COLUMN stop_order_id TEXT`);
+    console.log('[db] Migration: live_trades.stop_order_id kolonu eklendi');
+  }
 
   return db;
 }
