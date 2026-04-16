@@ -1,0 +1,48 @@
+# Bağımlılıklar
+node_modules/
+dist/
+
+# Ortam değişkenleri — ASLA git'e ekleme (private key burada!)
+.env
+.env.local
+.env.*.local
+
+# Veritabanı — trade geçmişi, kişisel veri
+data/
+*.db
+*.sqlite
+
+# PM2 logları
+*.log
+
+# Test / geçici scriptler (tek seferlik araçlar)
+check_*.js
+check_*.ts
+find_*.js
+get_*.js
+decode_*.js
+fast_*.js
+approve_ctf.ts
+auto_redeem.js
+redeem*.js
+redeem_wins*.js
+redeem_t*.js
+redeem_new.js
+redeem2.js
+redeem3.js
+redeem4.js
+redeem5.js
+redeem6.js
+redeem7.js
+
+# Backup dosyaları
+*.bak
+*.bak_*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
