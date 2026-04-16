@@ -40,6 +40,12 @@ const TARGET     = 0.99;
 const STOP_DIST  = 0.06;
 const TAKER_FEE  = 0.02;  // %2 tahmini — gerçek işlemle doğrulanacak
 
+// Fake stop engelleme: giriş sonrası bu kadar saniye geçmeden stop tetiklenemez.
+// İstisna: remaining < 30s ise market kapanmadan önce acil çıkış yapılır.
+// Etki: T10019(17s), T10020(19s), T10021(20s), T10023(29s) → engellendi
+//        T10022(130s) → hâlâ yakalanır (doğru davranış)
+const MIN_HOLD_BEFORE_STOP = 60;  // saniye
+
 // CLOB order parametreleri
 const TICK_SIZE   = '0.01';  // BTC 5dk marketlerinin minimum tick'i
 const FOK_FEE_BPS = 1000;    // Taker FOK için zorunlu minimum
@@ -261,10 +267,10 @@ export async function updateScalpLive(
     WHERE market_id=? AND outcome='OPEN'
   `).all(market.id) as {
     id: number; side: string; token_id: string;
-    shares: number; entry_price: number;
+    shares: number; entry_price: number; entry_ts: number;
     target_price: number; stop_price: number;
     exit_order_id: string | null;
-    stop_order_id: string | null;  // ← NEW
+    stop_order_id: string | null;
   }[];
 
   if (!open.length) return;
@@ -278,7 +284,29 @@ export async function updateScalpLive(
     // Stop tetiklendi mi? mid <= stop_price ise çık
     if (mid > t.stop_price) continue;
 
-    console.log(`[live] 🛑 STOP tetiklendi ${t.side} | mid=${mid} ≤ stop=${t.stop_price}`);
+    // ── Minimum hold süresi kontrolü (fake stop engelleme) ─────────────────
+    const holdTime  = now - t.entry_ts;
+    const remaining = market.closeTime - now;
+
+    if (holdTime < MIN_HOLD_BEFORE_STOP) {
+      if (remaining >= 30) {
+        // Henüz erken — bekle, sonraki tick'te tekrar kontrol edilecek
+        console.log(
+          `[live] ⏱ STOP ERKEN — hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
+          ` | remaining=${remaining}s → bekleniyor (fake stop engellendi)`,
+        );
+        continue;
+      } else {
+        // Market kapanmak üzere — erken ama acil çıkış yap
+        console.log(
+          `[live] ⚠️ STOP ERKEN ama remaining=${remaining}s < 30s` +
+          ` — acil çıkış yapılıyor (market kapanmadan önce)`,
+        );
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    console.log(`[live] 🛑 STOP tetiklendi ${t.side} | mid=${mid} ≤ stop=${t.stop_price} | hold=${holdTime}s`);
 
     try {
       const client = await getClobClient();
