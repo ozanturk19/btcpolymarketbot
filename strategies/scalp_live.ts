@@ -198,23 +198,40 @@ export async function checkScalpLive(
       }
 
       // GTC STOP emri: stop seviyesine maker order koy (alıcı bekliyoruz)
-      // FOK cascade'den çok daha iyi: fiyat oraya gelince otomatik dolar
+      // FOK cascade'den çok daha iyi: fiyat oraya gelince otomatik dolar, slippage yok.
+      //
+      // SORUN: FOK BUY fill sonrası CLOB token bakiyesini hemen görmeyebilir (balance: 0).
+      // ÇÖZÜM: 3 deneme, aralarında 3s bekle. Blockchain settlement gecikmesini tolere eder.
       let stopOrderId: string | null = null;
-      try {
-        const stopOrder = await client.createOrder(
-          { tokenID: tokenId, price: stopPrice, side: Side.SELL, size: 5, feeRateBps: GTC_FEE_BPS },
-          { tickSize: TICK_SIZE, negRisk: false },
-        );
-        const stopResult = await client.postOrder(stopOrder, OrderType.GTC);
-        const stopErr = (stopResult as any).error ?? (stopResult as any).errorMsg;
-        if (!stopErr) {
-          stopOrderId = (stopResult as any).orderID ?? null;
-          console.log(`[live] 🎯 GTC STOP @${stopPrice} set | order=${stopOrderId?.slice(0,10)}...`);
-        } else {
-          console.warn(`[live] GTC STOP kurulamadı: ${stopErr} — FOK cascade fallback aktif`);
+      for (let gtcAttempt = 0; gtcAttempt < 3; gtcAttempt++) {
+        if (gtcAttempt > 0) {
+          console.log(`[live] GTC STOP deneme ${gtcAttempt + 1}/3 — 3s bekleniyor (CLOB bakiye gecikmesi)...`);
+          await new Promise(r => setTimeout(r, 3000));
         }
-      } catch(e: any) {
-        console.warn(`[live] GTC STOP hatası: ${e.message}`);
+        try {
+          const stopOrder = await client.createOrder(
+            { tokenID: tokenId, price: stopPrice, side: Side.SELL, size: 5, feeRateBps: GTC_FEE_BPS },
+            { tickSize: TICK_SIZE, negRisk: false },
+          );
+          const stopResult = await client.postOrder(stopOrder, OrderType.GTC);
+          const stopErr = (stopResult as any).error ?? (stopResult as any).errorMsg;
+          if (!stopErr) {
+            stopOrderId = (stopResult as any).orderID ?? null;
+            console.log(`[live] 🎯 GTC STOP @${stopPrice} set (deneme ${gtcAttempt + 1}) | order=${stopOrderId?.slice(0,10)}...`);
+            break;
+          }
+          // balance: 0 → CLOB henüz token görmüyor, tekrar dene
+          if (stopErr.includes('balance: 0')) {
+            console.warn(`[live] GTC STOP deneme ${gtcAttempt + 1}: balance=0 (CLOB gecikmesi) — ${gtcAttempt < 2 ? 'tekrar deneniyor' : 'FOK cascade devreye girecek'}`);
+            continue;
+          }
+          // Başka bir hata — tekrar denemenin anlamı yok
+          console.warn(`[live] GTC STOP kurulamadı: ${stopErr} — FOK cascade fallback aktif`);
+          break;
+        } catch(e: any) {
+          console.warn(`[live] GTC STOP hatası: ${e.message}`);
+          break;
+        }
       }
 
       // DB'ye kaydet
@@ -352,7 +369,9 @@ export async function updateScalpLive(
       let filled        = false;
       let filledPrice   = 0;
       let attemptIndex  = -1;
-      let stopSellSize  = t.shares;  // Başlangıçta ordered shares ile dene
+      // size=5 sabit: 6 share alındı → fee sonrası ~5.97 token, 5 satmak her zaman geçerli.
+      // t.shares(6) ile başlamak 1. denemeyi hep "not enough balance" ile batırıyordu.
+      let stopSellSize  = 5;
 
       for (let i = 0; i < stopAttempts.length; i++) {
         const tryPrice = stopAttempts[i];
