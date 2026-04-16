@@ -31,7 +31,7 @@
 import type { Db }      from '../db/schema';
 import type { BtcMarket } from '../discovery';
 import { getClobClient } from '../live/client';
-import { Side, OrderType } from '@polymarket/clob-client';
+import { Side, OrderType, AssetType } from '@polymarket/clob-client';
 
 const SIZE_USD   = 5;     // ~$4.60 per trade — CLOB min order = 5 shares
 const ENTRY_MIN  = 0.91;
@@ -171,70 +171,81 @@ export async function checkScalpLive(
       const sizeMatched = (buyResult as any).size_matched ?? (buyResult as any).sizeMatched ?? shares;
       console.log(`[live] ✅ BUY FILL @${entryPrice} | order=${entryOrderId.slice(0,10)}... | filled=${sizeMatched}`);
 
-      // SELL — GTC limit @ target (maker, ücretsiz)
-      // size=5 sabit — 6 share alıyoruz (fee sonrası ≥5.8 token garantili), 5 satmak her zaman geçerli.
-      // Eski yaklaşım (size=shares=6) "not enough balance" veriyordu → artık gerek yok.
-      const GTC_SELL_SIZE = 5;
-      let exitOrderId: string | null = null;
-      try {
-        const sellOrder = await client.createOrder(
-          { tokenID: tokenId, price: TARGET, side: Side.SELL, size: GTC_SELL_SIZE, feeRateBps: GTC_FEE_BPS },
-          { tickSize: TICK_SIZE, negRisk: false },
-        );
-        const sellResult = await client.postOrder(sellOrder, OrderType.GTC);
-        const sellError: string | undefined = (sellResult as any).error ?? (sellResult as any).errorMsg;
-
-        if (sellError) {
-          console.warn(`[live] SELL LIMIT kurulamadı: ${sellError} — settlement'a bırakıldı`);
-        } else {
-          exitOrderId = (sellResult as any).orderID ?? null;
-        }
-
-        if (exitOrderId) {
-          console.log(`[live] 📋 SELL LIMIT @${TARGET} set | size=${GTC_SELL_SIZE} | order=${exitOrderId.slice(0,10)}...`);
-        }
-      } catch(e: any) {
-        console.warn(`[live] SELL LIMIT hatası: ${e.message}`);
+      // ── ADIM 2: Token bakiyesi onaylanana kadar bekle ─────────────────────────
+      // FOK BUY fill sonrası CLOB conditional token bakiyesini hemen görmez.
+      // Blockchain: MATCHED → MINED → CONFIRMED geçişi ~2-15 saniye sürer.
+      // getBalanceAllowance(CONDITIONAL) ile poll et, bakiye > 0 gelince devam et.
+      let confirmedBalance = 0;
+      for (let poll = 0; poll < 12; poll++) {
+        await new Promise(r => setTimeout(r, 1000));  // 1s bekle
+        try {
+          const balRes = await client.getBalanceAllowance({
+            asset_type: AssetType.CONDITIONAL,
+            token_id: tokenId,
+          });
+          const raw = Math.floor(parseFloat(balRes.balance) * 100) / 100;
+          if (raw >= 1) {
+            confirmedBalance = raw;
+            console.log(`[live] 💰 Token onaylandı: ${confirmedBalance} shares (${poll + 1}s)`);
+            break;
+          }
+        } catch { /* polling geçici hata */ }
       }
+      if (confirmedBalance < 1) {
+        // 12s sonra hâlâ 0 — GTC kurulamaz, sadece DB kaydı (FOK cascade fallback çalışır)
+        console.warn('[live] ⚠️ Token bakiye 12s içinde onaylanmadı — GTC atlandı, FOK cascade fallback');
+        confirmedBalance = 0;
+      }
+      // ─────────────────────────────────────────────────────────────────────────
 
-      // GTC STOP emri: stop seviyesine maker order koy (alıcı bekliyoruz)
-      // FOK cascade'den çok daha iyi: fiyat oraya gelince otomatik dolar, slippage yok.
-      //
-      // SORUN: FOK BUY fill sonrası CLOB token bakiyesini hemen görmeyebilir (balance: 0).
-      // ÇÖZÜM: 3 deneme, aralarında 3s bekle. Blockchain settlement gecikmesini tolere eder.
-      let stopOrderId: string | null = null;
-      for (let gtcAttempt = 0; gtcAttempt < 3; gtcAttempt++) {
-        if (gtcAttempt > 0) {
-          console.log(`[live] GTC STOP deneme ${gtcAttempt + 1}/3 — 3s bekleniyor (CLOB bakiye gecikmesi)...`);
-          await new Promise(r => setTimeout(r, 3000));
+      // ── ADIM 3: GTC SELL @ target (maker, ücretsiz, confirmedBalance ile) ───
+      // confirmedBalance = tüm tokenlar (örn. 5.97) — hepsini target'ta sat
+      let exitOrderId: string | null = null;
+      if (confirmedBalance >= 5) {
+        try {
+          const sellOrder = await client.createOrder(
+            { tokenID: tokenId, price: TARGET, side: Side.SELL, size: confirmedBalance, feeRateBps: GTC_FEE_BPS },
+            { tickSize: TICK_SIZE, negRisk: false },
+          );
+          const sellResult = await client.postOrder(sellOrder, OrderType.GTC);
+          const sellError: string | undefined = (sellResult as any).error ?? (sellResult as any).errorMsg;
+          if (sellError) {
+            console.warn(`[live] SELL LIMIT kurulamadı: ${sellError} — settlement'a bırakıldı`);
+          } else {
+            exitOrderId = (sellResult as any).orderID ?? null;
+            console.log(`[live] 📋 SELL LIMIT @${TARGET} set | size=${confirmedBalance} | order=${exitOrderId?.slice(0,10)}...`);
+          }
+        } catch(e: any) {
+          console.warn(`[live] SELL LIMIT hatası: ${e.message}`);
         }
+      }
+      // ─────────────────────────────────────────────────────────────────────────
+
+      // ── ADIM 4: GTC STOP @ stop_price (confirmedBalance ile — kalan 1 share yok!) ─
+      // confirmedBalance = 5.97 → GTC stop size=5.97 → TÜMÜ satılıyor
+      // Önceki sorun: size=5 satınca 0.97 token askıda kalıyordu → şimdi yok
+      let stopOrderId: string | null = null;
+      if (confirmedBalance >= 5) {
         try {
           const stopOrder = await client.createOrder(
-            { tokenID: tokenId, price: stopPrice, side: Side.SELL, size: 5, feeRateBps: GTC_FEE_BPS },
+            { tokenID: tokenId, price: stopPrice, side: Side.SELL, size: confirmedBalance, feeRateBps: GTC_FEE_BPS },
             { tickSize: TICK_SIZE, negRisk: false },
           );
           const stopResult = await client.postOrder(stopOrder, OrderType.GTC);
           const stopErr = (stopResult as any).error ?? (stopResult as any).errorMsg;
           if (!stopErr) {
             stopOrderId = (stopResult as any).orderID ?? null;
-            console.log(`[live] 🎯 GTC STOP @${stopPrice} set (deneme ${gtcAttempt + 1}) | order=${stopOrderId?.slice(0,10)}...`);
-            break;
+            console.log(`[live] 🎯 GTC STOP @${stopPrice} set | size=${confirmedBalance} | order=${stopOrderId?.slice(0,10)}...`);
+          } else {
+            console.warn(`[live] GTC STOP kurulamadı: ${stopErr} — FOK cascade fallback aktif`);
           }
-          // balance: 0 → CLOB henüz token görmüyor, tekrar dene
-          if (stopErr.includes('balance: 0')) {
-            console.warn(`[live] GTC STOP deneme ${gtcAttempt + 1}: balance=0 (CLOB gecikmesi) — ${gtcAttempt < 2 ? 'tekrar deneniyor' : 'FOK cascade devreye girecek'}`);
-            continue;
-          }
-          // Başka bir hata — tekrar denemenin anlamı yok
-          console.warn(`[live] GTC STOP kurulamadı: ${stopErr} — FOK cascade fallback aktif`);
-          break;
         } catch(e: any) {
           console.warn(`[live] GTC STOP hatası: ${e.message}`);
-          break;
         }
       }
+      // ─────────────────────────────────────────────────────────────────────────
 
-      // DB'ye kaydet
+      // DB'ye kaydet (confirmedBalance'ı kaydet — P&L hesabı için)
       insertLiveTrade(db, market, side, tokenId, entryOrderId, exitOrderId, stopOrderId, shares, entryPrice, stopPrice);
       break; // aynı tick'te tek taraf
 
@@ -369,53 +380,65 @@ export async function updateScalpLive(
       let filled        = false;
       let filledPrice   = 0;
       let attemptIndex  = -1;
-      // size=5 sabit: 6 share alındı → fee sonrası ~5.97 token, 5 satmak her zaman geçerli.
-      // t.shares(6) ile başlamak 1. denemeyi hep "not enough balance" ile batırıyordu.
-      let stopSellSize  = 5;
+      // Başlangıç size: t.shares ile başla (bakiye hatasında aynı fiyatta retry yapılır)
+      // NOT: bakiye hatası = FIYAT SORUNUM DEĞİL, aynı fiyatta retry gerekir.
+      //      likidite hatası = fiyat çok yüksek, bir sonraki (daha düşük) fiyata geç.
+      let stopSellSize  = t.shares;
 
       for (let i = 0; i < stopAttempts.length; i++) {
         const tryPrice = stopAttempts[i];
-        console.log(`[live] STOP deneme ${i + 1}/${stopAttempts.length} @${tryPrice} | size=${stopSellSize}`);
+        let movedToNextPrice = false;
 
-        try {
-          const sellOrder = await client.createOrder(
-            { tokenID: t.token_id, price: tryPrice, side: Side.SELL, size: stopSellSize, feeRateBps: FOK_FEE_BPS },
-            { tickSize: TICK_SIZE, negRisk: false },
-          );
-          const sellResult = await client.postOrder(sellOrder, OrderType.FOK);
+        // Aynı fiyat seviyesinde maksimum 2 kez dene (1. hata → bakiye düzelt → tekrar dene)
+        for (let sizeRetry = 0; sizeRetry < 2; sizeRetry++) {
+          console.log(`[live] STOP deneme fiyat=${i + 1}/${stopAttempts.length} @${tryPrice} | size=${stopSellSize}${sizeRetry > 0 ? ' (bakiye retry)' : ''}`);
 
-          const sellError   = (sellResult as any).error ?? (sellResult as any).errorMsg;
-          const sizeMatched = parseFloat((sellResult as any).size_matched ?? (sellResult as any).sizeMatched ?? '0');
-          const orderFilled = !sellError && (
-            (sellResult as any).success === true     ||
-            (sellResult as any).status === 'matched' ||
-            sizeMatched > 0
-          );
+          try {
+            const sellOrder = await client.createOrder(
+              { tokenID: t.token_id, price: tryPrice, side: Side.SELL, size: stopSellSize, feeRateBps: FOK_FEE_BPS },
+              { tickSize: TICK_SIZE, negRisk: false },
+            );
+            const sellResult = await client.postOrder(sellOrder, OrderType.FOK);
 
-          if (orderFilled) {
-            filled       = true;
-            filledPrice  = tryPrice;
-            attemptIndex = i;
-            console.log(`[live] ✅ STOP FILL @${tryPrice} (deneme ${i + 1})`);
+            const sellError   = (sellResult as any).error ?? (sellResult as any).errorMsg;
+            const sizeMatched = parseFloat((sellResult as any).size_matched ?? (sellResult as any).sizeMatched ?? '0');
+            const orderFilled = !sellError && (
+              (sellResult as any).success === true     ||
+              (sellResult as any).status === 'matched' ||
+              sizeMatched > 0
+            );
+
+            if (orderFilled) {
+              filled       = true;
+              filledPrice  = tryPrice;
+              attemptIndex = i;
+              console.log(`[live] ✅ STOP FILL @${tryPrice} size=${stopSellSize}`);
+              break;
+            }
+
+            // ── Bakiye hatası: aynı fiyatta retry, daha düşük fiyata geçme ──
+            if (sellError && sellError.includes('not enough balance')) {
+              const parsedBal = parseBalanceFromError(sellError);
+              if (parsedBal && parsedBal > 0 && parsedBal < stopSellSize) {
+                console.warn(`[live] ⚠️  Bakiye düzelt: ${stopSellSize}→${parsedBal} | aynı fiyat @${tryPrice} tekrar`);
+                stopSellSize = parsedBal;
+                continue;  // ← aynı fiyat seviyesinde tekrar (sizeRetry++)
+              }
+            }
+
+            // ── Likidite hatası veya başka hata: sonraki fiyat seviyesine geç ──
+            console.warn(`[live] ⚠️  STOP @${tryPrice} DOLMADI | hata=${sellError ?? 'yok'} → sonraki fiyat`);
+            movedToNextPrice = true;
+            break;
+
+          } catch(e: any) {
+            console.warn(`[live] STOP HATA @${tryPrice}: ${e.message}`);
+            movedToNextPrice = true;
             break;
           }
-
-          // "not enough balance" → hata mesajından gerçek bakiyeyi parse et
-          if (sellError && sellError.includes('not enough balance')) {
-            const parsedBal = parseBalanceFromError(sellError);
-            if (parsedBal && parsedBal > 0 && parsedBal < stopSellSize) {
-              console.warn(`[live] ⚠️  Bakiye düzeltme: ${stopSellSize} → ${parsedBal} (hata mesajından)`);
-              stopSellSize = parsedBal;  // Sonraki denemeler için güncelle
-            }
-          }
-
-          console.warn(
-            `[live] ⚠️  STOP deneme ${i + 1} DOLMADI @${tryPrice} | ` +
-            `hata=${sellError ?? 'yok'} | matched=${sizeMatched}`,
-          );
-        } catch(e: any) {
-          console.warn(`[live] STOP deneme ${i + 1} HATA: ${e.message}`);
         }
+
+        if (filled) break;
       }
 
       if (!filled) {
