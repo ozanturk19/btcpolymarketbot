@@ -172,43 +172,26 @@ export async function checkScalpLive(
       console.log(`[live] ✅ BUY FILL @${entryPrice} | order=${entryOrderId.slice(0,10)}... | filled=${sizeMatched}`);
 
       // SELL — GTC limit @ target (maker, ücretsiz)
-      // Not: CLOB taker fee sonrası bakiye shares'tan az olabilir (örn. 6 → 5.88).
-      // Önce shares ile dene; "not enough balance" alırsak hata mesajından bakiyeyi parse et ve tekrar dene.
+      // size=5 sabit — 6 share alıyoruz (fee sonrası ≥5.8 token garantili), 5 satmak her zaman geçerli.
+      // Eski yaklaşım (size=shares=6) "not enough balance" veriyordu → artık gerek yok.
+      const GTC_SELL_SIZE = 5;
       let exitOrderId: string | null = null;
       try {
-        let sellSize = shares;
         const sellOrder = await client.createOrder(
-          { tokenID: tokenId, price: TARGET, side: Side.SELL, size: sellSize, feeRateBps: GTC_FEE_BPS },
+          { tokenID: tokenId, price: TARGET, side: Side.SELL, size: GTC_SELL_SIZE, feeRateBps: GTC_FEE_BPS },
           { tickSize: TICK_SIZE, negRisk: false },
         );
         const sellResult = await client.postOrder(sellOrder, OrderType.GTC);
-        let sellError: string | undefined = (sellResult as any).error ?? (sellResult as any).errorMsg;
+        const sellError: string | undefined = (sellResult as any).error ?? (sellResult as any).errorMsg;
 
-        // "not enough balance" → bakiyeyi parse et, tekrar dene
-        if (sellError && sellError.includes('not enough balance')) {
-          const parsedBal = parseBalanceFromError(sellError);
-          if (parsedBal && parsedBal >= 5) {
-            console.warn(`[live] SELL LIMIT retry: bakiye ${sellSize} yetersiz, gerçek bakiye ${parsedBal}`);
-            sellSize = parsedBal;
-            const sellOrder2 = await client.createOrder(
-              { tokenID: tokenId, price: TARGET, side: Side.SELL, size: sellSize, feeRateBps: GTC_FEE_BPS },
-              { tickSize: TICK_SIZE, negRisk: false },
-            );
-            const sellResult2 = await client.postOrder(sellOrder2, OrderType.GTC);
-            sellError = (sellResult2 as any).error ?? (sellResult2 as any).errorMsg;
-            exitOrderId = sellError ? null : ((sellResult2 as any).orderID ?? null);
-          } else {
-            // Bakiye < 5: minimum altında, GTC kurulamaz — settlement'a bırak
-            console.warn(`[live] SELL LIMIT atlandı: bakiye ${parsedBal ?? '?'} < 5 minimum`);
-          }
+        if (sellError) {
+          console.warn(`[live] SELL LIMIT kurulamadı: ${sellError} — settlement'a bırakıldı`);
         } else {
-          exitOrderId = sellError ? null : ((sellResult as any).orderID ?? null);
+          exitOrderId = (sellResult as any).orderID ?? null;
         }
 
         if (exitOrderId) {
-          console.log(`[live] 📋 SELL LIMIT @${TARGET} set | size=${sellSize} | order=${exitOrderId.slice(0,10)}...`);
-        } else if (sellError && !sellError.includes('not enough balance')) {
-          console.warn(`[live] SELL LIMIT kurulamadı: ${sellError} — settlement'a bırakıldı`);
+          console.log(`[live] 📋 SELL LIMIT @${TARGET} set | size=${GTC_SELL_SIZE} | order=${exitOrderId.slice(0,10)}...`);
         }
       } catch(e: any) {
         console.warn(`[live] SELL LIMIT hatası: ${e.message}`);
