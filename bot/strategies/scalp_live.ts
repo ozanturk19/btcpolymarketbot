@@ -134,7 +134,11 @@ export async function checkScalpLive(
     if (exists) continue;
 
     // --- Sipariş ver ---
-    const entryPrice = roundTick(ask);  // 0.01 tick'e yuvarla
+    // ask + 0.01: FOK buffer — sinyal fiyatından 1 tick agresif gir.
+    // ask=0.92'de tam ask'tan order verince ask 0.93'e kayarsa KILL olur.
+    // +0.01 buffer: ask hareket etse bile fill garantili, max maliyet 0.94 (@ask=0.93).
+    // Breakeven WR @0.94: %55 — paper WR %83 → hâlâ karlı.
+    const entryPrice = roundTick(ask + 0.01);
     // Shares: +1 ekle → fee sonrası (×0.98) ≥5 garantili, GTC stop için minimum 5 sağlanır.
     // Örn: 0.92'de: 6 × 0.98 = 5.88 → GTC stop @ stop_price için yeterli.
     const shares = Math.max(6, Math.round(SIZE_USD / entryPrice) + 1);  // +1 → fee sonrası ≥5 garantili
