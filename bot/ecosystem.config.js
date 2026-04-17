@@ -1,0 +1,35 @@
+module.exports = {
+  apps: [
+    {
+      name: 'polymarket-bot',
+      script: 'node_modules/.bin/ts-node',
+      args: '--transpile-only index.ts --mode=paper',
+      cwd: '/opt/polymarket/bot',
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+      node_args: '--max-old-space-size=512',
+      log_file: '/opt/polymarket/bot/data/bot.log',
+      error_file: '/opt/polymarket/bot/data/bot-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+    {
+      name: 'polymarket-live',
+      script: 'node_modules/.bin/ts-node',
+      args: '--transpile-only index.ts --mode=live',
+      cwd: '/opt/polymarket/bot',
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 10000,
+      node_args: '--max-old-space-size=512',
+      kill_timeout: 5000,
+      log_file: '/opt/polymarket/bot/data/live.log',
+      error_file: '/opt/polymarket/bot/data/live-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+  ]
+};
