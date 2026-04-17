@@ -183,7 +183,8 @@ export async function checkScalpLive(
             asset_type: AssetType.CONDITIONAL,
             token_id: tokenId,
           });
-          const raw = Math.floor(parseFloat(balRes.balance) * 100) / 100;
+          // getBalanceAllowance microshares döner (örn. 5969760 = 5.97 shares)
+          const raw = Math.floor((parseFloat(balRes.balance) / 1e6) * 100) / 100;
           if (raw >= 1) {
             confirmedBalance = raw;
             console.log(`[live] 💰 Token onaylandı: ${confirmedBalance} shares (${poll + 1}s)`);
