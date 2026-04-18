@@ -36,15 +36,19 @@ import { Side, OrderType, AssetType } from '@polymarket/clob-client';
 const SIZE_USD   = 5;     // ~$4.60 per trade — CLOB min order = 5 shares
 const ENTRY_MIN  = 0.91;
 const ENTRY_MAX  = 0.93;
-const TARGET     = 0.99;
+// TARGET kaldırıldı — settlement 1.00 öder, ayrıca SELL limit gerekmez
 const STOP_DIST  = 0.06;
-const TAKER_FEE  = 0.02;  // %2 tahmini — gerçek işlemle doğrulanacak
+// TAKER_FEE kaldırıldı: fee token sayısına yansıdı (6 share → 5.96 token), P&L'e ayrıca eklenmez
 
 // Fake stop engelleme: giriş sonrası bu kadar saniye geçmeden stop tetiklenemez.
-// İstisna: remaining < 30s ise market kapanmadan önce acil çıkış yapılır.
+// İstisna 1: remaining < 30s ise market kapanmadan önce acil çıkış yapılır.
+// İstisna 2: mid < stop_price - CRASH_BYPASS_DIST ise gerçek crash → MIN_HOLD bypass.
 // Etki: T10019(17s), T10020(19s), T10021(20s), T10023(29s) → engellendi
 //        T10022(130s) → hâlâ yakalanır (doğru davranış)
+//        T10042: mid=0.705, stop=0.86, diff=0.155 > 0.10 → bypass (artık zarar engellenir)
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye
+// stop_price'dan bu kadar aşağı düşerse MIN_HOLD bypass edilir (gerçek crash)
+const CRASH_BYPASS_DIST = 0.07;   // diff > 0.07 → acil çıkış (fake dip max ~0.03-0.04; veri: T10021=0.095, T10023=0.075 gecikti)
 
 // CLOB order parametreleri
 const TICK_SIZE   = '0.01';  // BTC 5dk marketlerinin minimum tick'i
@@ -74,7 +78,7 @@ function insertLiveTrade(
     market.id, tokenId, side,
     entryOrderId, exitOrderId, stopOrderId,
     shares, entryPrice, now,
-    TARGET, stopPrice, SIZE_USD,
+    null, stopPrice, SIZE_USD,
   );
 }
 
@@ -134,16 +138,19 @@ export async function checkScalpLive(
     if (exists) continue;
 
     // --- Sipariş ver ---
-    const entryPrice = roundTick(ask);  // 0.01 tick'e yuvarla
+    // ask + 0.01: FOK buffer — sinyal fiyatından 1 tick agresif gir.
+    // ask=0.92'de tam ask'tan order verince ask 0.93'e kayarsa KILL olur.
+    // +0.01 buffer: ask hareket etse bile fill garantili, max maliyet 0.94 (@ask=0.93).
+    // Breakeven WR @0.94: %55 — paper WR %83 → hâlâ karlı.
+    const entryPrice = roundTick(ask + 0.01);
     // Shares: +1 ekle → fee sonrası (×0.98) ≥5 garantili, GTC stop için minimum 5 sağlanır.
     // Örn: 0.92'de: 6 × 0.98 = 5.88 → GTC stop @ stop_price için yeterli.
     const shares = Math.max(6, Math.round(SIZE_USD / entryPrice) + 1);  // +1 → fee sonrası ≥5 garantili
     const stopPrice  = roundTick(entryPrice - STOP_DIST);
-    const fee        = entryPrice * shares * TAKER_FEE;
 
     console.log(
       `[live] SİNYAL ${side} @${entryPrice} | ${shares} share` +
-      ` | stop@${stopPrice} target@${TARGET} | fee≈$${fee.toFixed(3)}` +
+      ` | stop@${stopPrice}` +
       ` | ${market.question.slice(0, 35)}`
     );
 
@@ -199,32 +206,8 @@ export async function checkScalpLive(
       }
       // ─────────────────────────────────────────────────────────────────────────
 
-      // ── ADIM 3: GTC SELL @ target (maker, ücretsiz, confirmedBalance ile) ───
-      // confirmedBalance = tüm tokenlar (örn. 5.97) — hepsini target'ta sat
-      let exitOrderId: string | null = null;
-      if (confirmedBalance >= 5) {
-        try {
-          const sellOrder = await client.createOrder(
-            { tokenID: tokenId, price: TARGET, side: Side.SELL, size: confirmedBalance, feeRateBps: GTC_FEE_BPS },
-            { tickSize: TICK_SIZE, negRisk: false },
-          );
-          const sellResult = await client.postOrder(sellOrder, OrderType.GTC);
-          const sellError: string | undefined = (sellResult as any).error ?? (sellResult as any).errorMsg;
-          if (sellError) {
-            console.warn(`[live] SELL LIMIT kurulamadı: ${sellError} — settlement'a bırakıldı`);
-          } else {
-            exitOrderId = (sellResult as any).orderID ?? null;
-            console.log(`[live] 📋 SELL LIMIT @${TARGET} set | size=${confirmedBalance} | order=${exitOrderId?.slice(0,10)}...`);
-          }
-        } catch(e: any) {
-          console.warn(`[live] SELL LIMIT hatası: ${e.message}`);
-        }
-      }
-      // ─────────────────────────────────────────────────────────────────────────
-
-      // ── ADIM 4: GTC STOP @ stop_price (confirmedBalance ile — kalan 1 share yok!) ─
-      // confirmedBalance = 5.97 → GTC stop size=5.97 → TÜMÜ satılıyor
-      // Önceki sorun: size=5 satınca 0.97 token askıda kalıyordu → şimdi yok
+      // ── ADIM 3: GTC STOP @ stop_price ────────────────────────────────────────
+      // SELL LIMIT (target) tamamen kaldırıldı — settlement 1.00 öder.
       let stopOrderId: string | null = null;
       if (confirmedBalance >= 5) {
         try {
@@ -246,8 +229,8 @@ export async function checkScalpLive(
       }
       // ─────────────────────────────────────────────────────────────────────────
 
-      // DB'ye kaydet (confirmedBalance'ı kaydet — P&L hesabı için)
-      insertLiveTrade(db, market, side, tokenId, entryOrderId, exitOrderId, stopOrderId, shares, entryPrice, stopPrice);
+      // DB'ye kaydet
+      insertLiveTrade(db, market, side, tokenId, entryOrderId, null, stopOrderId, shares, entryPrice, stopPrice);
       break; // aynı tick'te tek taraf
 
     } catch(e: any) {
@@ -280,8 +263,7 @@ export async function updateScalpLive(
   `).all(market.id) as {
     id: number; side: string; token_id: string;
     shares: number; entry_price: number; entry_ts: number;
-    target_price: number; stop_price: number;
-    exit_order_id: string | null;
+    stop_price: number;
     stop_order_id: string | null;
   }[];
 
@@ -301,11 +283,19 @@ export async function updateScalpLive(
     const remaining = market.closeTime - now;
 
     if (holdTime < MIN_HOLD_BEFORE_STOP) {
-      if (remaining >= 30) {
-        // Henüz erken — bekle, sonraki tick'te tekrar kontrol edilecek
+      const crashDiff = t.stop_price - mid;
+      if (crashDiff > CRASH_BYPASS_DIST) {
+        // Fiyat stop'tan 10+ cent aşağı düştü → gerçek crash, acil çıkış
+        console.log(
+          `[live] 💥 CRASH BYPASS — hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
+          ` ama mid=${mid} crash (stop=${t.stop_price}, diff=${crashDiff.toFixed(3)} > ${CRASH_BYPASS_DIST})` +
+          ` — acil çıkış yapılıyor`,
+        );
+      } else if (remaining >= 30) {
+        // Henüz erken ve küçük dip — bekle, fake stop engellendi
         console.log(
           `[live] ⏱ STOP ERKEN — hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
-          ` | remaining=${remaining}s → bekleniyor (fake stop engellendi)`,
+          ` | remaining=${remaining}s | diff=${crashDiff.toFixed(3)} → bekleniyor (fake stop engellendi)`,
         );
         continue;
       } else {
@@ -334,8 +324,8 @@ export async function updateScalpLive(
           if (status === 'MATCHED' || sizeMatched > 0) {
             // GTC stop emri zaten dolmuş — harika, stop_price'tan çıktık
             const filledPrice = makePrice || roundTick(t.stop_price);
-            const fee = t.entry_price * sizeMatched * TAKER_FEE;
-            const pnl = (filledPrice - t.entry_price) * sizeMatched - fee;
+            // Gerçek P&L: çıkış geliri - giriş maliyeti (fee token sayısına yansıdı, ayrıca düşülmez)
+            const pnl = filledPrice * sizeMatched - t.entry_price * t.shares;
             db.prepare(`
               UPDATE live_trades
               SET exit_price=?, exit_ts=?, exit_reason='stop_gtc_filled',
@@ -358,15 +348,7 @@ export async function updateScalpLive(
         }
       }
 
-      // Önce mevcut SELL limitini (target order) iptal et (varsa)
-      if (t.exit_order_id) {
-        try {
-          await client.cancelOrder({ orderID: t.exit_order_id });
-          console.log(`[live] SELL limit iptal edildi`);
-        } catch(e: any) {
-          console.warn(`[live] Limit iptal uyarı: ${e.message}`);
-        }
-      }
+      // SELL LIMIT kaldırıldı — iptal edilecek order yok
 
       // ✅ KRİTİK: Kademeli FOK fiyatları — çıkışı garanti altına al
       // stop tetiklendiğinde mid <= stop_price, yani stop_price'ta alıcı yok.
@@ -455,8 +437,8 @@ export async function updateScalpLive(
       }
 
       // Fill başarılı → LOSS kaydet
-      const fee = t.entry_price * stopSellSize * TAKER_FEE;
-      const pnl = (filledPrice - t.entry_price) * stopSellSize - fee;
+      // Gerçek P&L: çıkış geliri - giriş maliyeti (fee zaten token sayısına yansıdı)
+      const pnl = filledPrice * stopSellSize - t.entry_price * t.shares;
 
       db.prepare(`
         UPDATE live_trades
@@ -501,8 +483,8 @@ export async function resolveScalpLive(db: Db, market: BtcMarket): Promise<void>
   for (const t of open) {
     const won       = t.side === market.outcome;
     const exitPrice = won ? 1.0 : 0.0;
-    const fee       = t.entry_price * t.shares * TAKER_FEE;
-    const pnl       = (exitPrice - t.entry_price) * t.shares - fee;
+    // Gerçek P&L: fee zaten token sayısına yansıdı, ayrıca düşülmez
+    const pnl       = (exitPrice - t.entry_price) * t.shares;
 
     // WIN ise GTC stop order'ı iptal et (artık gerek yok)
     if (won && t.stop_order_id) {
