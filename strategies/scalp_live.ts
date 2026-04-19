@@ -38,10 +38,26 @@ import { getClobClient } from '../live/client';
 import { Side, OrderType, AssetType } from '@polymarket/clob-client';
 
 const SIZE_USD   = 5;     // ~$4.60 per trade — CLOB min order = 5 shares
-const ENTRY_MIN  = 0.91;
-const ENTRY_MAX  = 0.93;
 // TARGET kaldirildi — settlement 1.00 oder, ayrica SELL limit gerekmez
 const STOP_DIST  = 0.06;
+
+// 5-dk market parametreleri
+const ENTRY_MIN_5    = 0.91;
+const ENTRY_MAX_5    = 0.93;
+const ELAPSED_MIN_5  = 90;
+const ELAPSED_MAX_5  = 240;
+const REMAINING_MIN_5 = 60;
+
+// 15-dk market parametreleri (paper data: 0.90-0.93 bandi WR %76, avg +$0.333)
+const ENTRY_MIN_15    = 0.90;
+const ENTRY_MAX_15    = 0.93;
+const ELAPSED_MIN_15  = 180;
+const ELAPSED_MAX_15  = 600;
+const REMAINING_MIN_15 = 120;
+
+// Circuit breaker: kapanmaya yakin ve fiyat belirsizse garantili cikis
+const CIRCUIT_BREAKER_REMAINING  = 30;   // saniye kaldiysa tetikle
+const CIRCUIT_BREAKER_THRESHOLD  = 0.96; // mid bu esik altinda + remaining<=30s -> acil sat
 
 // Fake stop engelleme: giris sonrasi bu kadar saniye gecmeden stop tetiklenemez.
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye
@@ -109,12 +125,19 @@ export async function checkScalpLive(
   downAsk: number | null,
   elapsed: number,
 ): Promise<void> {
-  if (market.durationMin !== 5) return;
+  if (market.durationMin !== 5 && market.durationMin !== 15) return;
 
   const now       = Math.floor(Date.now() / 1000);
   const remaining = market.closeTime - now;
 
-  if (elapsed < 90 || elapsed > 240 || remaining < 60) return;
+  // Duration-aware entry filtreleri
+  const entryMin     = market.durationMin === 15 ? ENTRY_MIN_15  : ENTRY_MIN_5;
+  const entryMax     = market.durationMin === 15 ? ENTRY_MAX_15  : ENTRY_MAX_5;
+  const elapsedMin   = market.durationMin === 15 ? ELAPSED_MIN_15 : ELAPSED_MIN_5;
+  const elapsedMax   = market.durationMin === 15 ? ELAPSED_MAX_15 : ELAPSED_MAX_5;
+  const remainingMin = market.durationMin === 15 ? REMAINING_MIN_15 : REMAINING_MIN_5;
+
+  if (elapsed < elapsedMin || elapsed > elapsedMax || remaining < remainingMin) return;
 
   const sides: [string, number | null, string | null][] = [
     ['UP',   upAsk,   market.tokenUp],
@@ -123,7 +146,7 @@ export async function checkScalpLive(
 
   for (const [side, ask, tokenId] of sides) {
     if (!ask || !tokenId) continue;
-    if (ask < ENTRY_MIN || ask > ENTRY_MAX) continue;
+    if (ask < entryMin || ask > entryMax) continue;
 
     const exists = db.prepare(`
       SELECT id FROM live_trades WHERE outcome='OPEN'
@@ -257,34 +280,51 @@ export async function updateScalpLive(
     const holdTime  = now - t.entry_ts;
     const remaining = market.closeTime - now;
 
-    if (!force) {
-      // ── Normal stop check ─────────────────────────────────────────────────
-      if (mid > t.stop_price) continue;
+    // -- Exit tetikleyici karar --
+    let exitTrigger: 'stop' | 'circuit_breaker' | 'force' | null = null;
 
-      // ── Minimum hold suresi kontrolu (fake stop engelleme) ────────────────
+    if (force) {
+      exitTrigger = 'force';
+    } else if (mid <= t.stop_price) {
+      // Normal stop -- min hold ve crash bypass
       if (holdTime < MIN_HOLD_BEFORE_STOP) {
         const crashDiff = t.stop_price - mid;
         if (crashDiff > CRASH_BYPASS_DIST) {
           console.log(
-            `[live] CRASH BYPASS — hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
+            `[live] CRASH BYPASS hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
             ` ama mid=${mid} crash (stop=${t.stop_price}, diff=${crashDiff.toFixed(3)} > ${CRASH_BYPASS_DIST})`,
           );
-        } else if (remaining >= 30) {
+          exitTrigger = 'stop';
+        } else if (remaining >= CIRCUIT_BREAKER_REMAINING) {
           console.log(
-            `[live] STOP ERKEN — hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
-            ` | remaining=${remaining}s | diff=${crashDiff.toFixed(3)} — bekleniyor`,
+            `[live] STOP ERKEN hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
+            ` | remaining=${remaining}s | diff=${crashDiff.toFixed(3)} -- bekleniyor`,
           );
-          continue;
+          // exitTrigger null kalir, asagida continue tetiklenir
         } else {
           console.log(
-            `[live] STOP ERKEN ama remaining=${remaining}s < 30s — acil cikis`,
+            `[live] STOP ERKEN ama remaining=${remaining}s < ${CIRCUIT_BREAKER_REMAINING}s -- acil cikis`,
           );
+          exitTrigger = 'stop';
         }
+      } else {
+        exitTrigger = 'stop';
       }
+    } else if (remaining > 0 && remaining <= CIRCUIT_BREAKER_REMAINING && mid < CIRCUIT_BREAKER_THRESHOLD) {
+      // CIRCUIT BREAKER: sure azaldi, fiyat belirsiz -- settlement riskini kapat
+      // Senaryo: mid 0.87-0.95, stop tetiklenmemis, market LOSS resolve edebilir
+      exitTrigger = 'circuit_breaker';
+      console.log(
+        `[live] CIRCUIT BREAKER T${t.id} ${t.side}` +
+        ` | remaining=${remaining}s <= ${CIRCUIT_BREAKER_REMAINING}s` +
+        ` | mid=${mid} < ${CIRCUIT_BREAKER_THRESHOLD}` +
+        ` | stop=${t.stop_price} (stop tetiklenmemisti)`,
+      );
     }
-    // force=true → MIN_HOLD ve stop_price kontrolu yok (post-close emergency exit)
 
-    const exitLabel = force ? 'FORCE/POST-CLOSE' : 'STOP';
+    if (exitTrigger === null) continue;
+
+        const exitLabel = force ? 'FORCE/POST-CLOSE' : exitTrigger === 'circuit_breaker' ? 'CIRCUIT-BREAKER' : 'STOP';
     console.log(
       `[live] EXIT ${exitLabel} ${t.side}` +
       ` | mid=${mid} | stop=${t.stop_price} | hold=${holdTime}s | remaining=${remaining}s`,
@@ -399,9 +439,10 @@ export async function updateScalpLive(
         continue;
       }
 
-      const exitReason = force
-        ? `post_close_fok_${attemptIndex + 1}`
-        : `stop_fok_${attemptIndex + 1}`;
+      const exitReasonBase = force ? 'post_close_fok'
+        : exitTrigger === 'circuit_breaker' ? 'circuit_breaker_fok'
+        : 'stop_fok';
+      const exitReason = `${exitReasonBase}_${attemptIndex + 1}`;
       const pnl = filledPrice * stopSellSize - t.entry_price * t.shares;
 
       db.prepare(`

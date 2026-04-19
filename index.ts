@@ -18,7 +18,7 @@ import { initClobClient, isClobReady } from './live/client';
 import { autoRedeemWins } from './live/redeem';
 
 const MODE = process.argv.find(a => a.startsWith('--mode='))?.split('=')[1] ?? 'observe';
-const DURATION_FILTER = [5];
+const DURATION_FILTER = [5, 15]; // 5dk + 15dk BTC marketleri
 
 // Post-close monitoring: market activeMarkets'tan cikinca acik pozisyon varsa
 // bu pencere kadar daha izlemeye devam et.

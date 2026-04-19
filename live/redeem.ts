@@ -30,6 +30,8 @@ const RPCS = [
   'https://rpc-mainnet.matic.quiknode.pro',
 ];
 
+const RPC_TIMEOUT_MS = 15_000;  // her RPC call için 15s timeout
+
 /** Positions API'den tokenId → conditionId haritası */
 async function fetchConditionMap(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
@@ -47,9 +49,20 @@ async function fetchConditionMap(): Promise<Map<string, string>> {
   return map;
 }
 
+/** Promise'i timeout ile wrap et */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
+  );
+  return Promise.race([promise, timeout]);
+}
+
 /**
  * DB'deki redemsiz WIN tokenları Polygon üzerinde redeem eder.
  * Her redeem sonrası DB'de redeemed=1 günceller.
+ *
+ * KRİTİK: StaticJsonRpcProvider kullan (polling yok → memory leak yok).
+ * JsonRpcProvider her instance'ta 4s polling timer başlatır ve GC edilmez.
  */
 export async function autoRedeemWins(db: Db): Promise<void> {
   let pending: { id: number; side: string; token_id: string }[];
@@ -70,8 +83,6 @@ export async function autoRedeemWins(db: Db): Promise<void> {
   for (const t of pending) {
     const conditionId = condMap.get(t.token_id);
     if (!conditionId) {
-      // Positions API'de görünmüyorsa zaten önceden redeem edilmiş olabilir
-      // DB'yi düzelt
       console.log(`[redeem] T${t.id} positions API'de yok → redeemed=1 (zaten işlendi)`);
       db.prepare(`UPDATE live_trades SET redeemed=1 WHERE id=?`).run(t.id);
       continue;
@@ -81,37 +92,50 @@ export async function autoRedeemWins(db: Db): Promise<void> {
     let redeemed   = false;
 
     for (const rpc of RPCS) {
+      // StaticJsonRpcProvider: polling timer BAŞLATMAZ → memory leak yok
+      const provider = new providers.StaticJsonRpcProvider(rpc);
       try {
-        const provider = new providers.JsonRpcProvider(rpc);
-        const wallet   = new Wallet(process.env.PRIVATE_KEY, provider);
-        const ctf      = new Contract(CTF, CTF_ABI, wallet);
-
-        const denom = await ctf.payoutDenominator(conditionId);
-        if (denom.toNumber() === 0) {
+        const denom = await withTimeout(
+          ctf_call(provider, conditionId),
+          RPC_TIMEOUT_MS,
+          `payoutDenominator ${rpc}`
+        );
+        if (denom === 0) {
           console.log(`[redeem] T${t.id} market henüz çözülmedi, atlanıyor`);
+          provider.removeAllListeners();
           break;
         }
 
-        const tx = await ctf.redeemPositions(
-          USDCE,
-          constants.HashZero,
-          conditionId,
-          [indexSet],
-          {
-            maxFeePerGas:         BigNumber.from('200000000000'),
-            maxPriorityFeePerGas: BigNumber.from('30000000000'),
-            gasLimit:             150000,
-          },
+        const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
+        const ctf    = new Contract(CTF, CTF_ABI, wallet);
+
+        const tx: any = await withTimeout(
+          ctf.redeemPositions(
+            USDCE,
+            constants.HashZero,
+            conditionId,
+            [indexSet],
+            {
+              maxFeePerGas:         BigNumber.from('200000000000'),
+              maxPriorityFeePerGas: BigNumber.from('30000000000'),
+              gasLimit:             150000,
+            },
+          ),
+          RPC_TIMEOUT_MS,
+          `redeemPositions ${rpc}`
         );
         console.log(`[redeem] T${t.id} TX: ${tx.hash}`);
-        await tx.wait();
+
+        await withTimeout(tx.wait(), 60_000, `tx.wait ${tx.hash.slice(0,10)}`);
         db.prepare(`UPDATE live_trades SET redeemed=1 WHERE id=?`).run(t.id);
         console.log(`[redeem] ✅ T${t.id} ${t.side} redeem tamamlandı`);
         redeemed = true;
+        provider.removeAllListeners();
         break;
 
       } catch (err: any) {
         console.warn(`[redeem] T${t.id} RPC ${rpc} hatası: ${err.message}`);
+        provider.removeAllListeners();
       }
     }
 
@@ -119,4 +143,11 @@ export async function autoRedeemWins(db: Db): Promise<void> {
       console.error(`[redeem] ❌ T${t.id} TÜM RPC'LER BAŞARISIZ — sonraki döngüde tekrar denenecek`);
     }
   }
+}
+
+/** payoutDenominator one-shot çağrısı (wallet gerekmez) */
+async function ctf_call(provider: any, conditionId: string): Promise<number> {
+  const ctf = new Contract(CTF, CTF_ABI, provider);
+  const denom = await ctf.payoutDenominator(conditionId);
+  return denom.toNumber();
 }
