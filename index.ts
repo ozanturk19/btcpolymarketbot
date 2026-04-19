@@ -56,14 +56,10 @@ async function tick(
             const bestBid = Number(book.bids.at(-1)!.price);
             const bestAsk = Number(book.asks.at(-1)!.price);
             const fastMid = (bestBid + bestAsk) / 2;
-            // Stop kontrolu VEYA pre-settle kontrolu
-            const isStop       = fastMid <= openForMarket.stop_price;
-            const isPreSettle  = remaining >= 0 && remaining <= 35 && fastMid < 0.97;
-            if (isStop || isPreSettle) {
+            if (fastMid <= openForMarket.stop_price) {
               const upMid   = openForMarket.side === 'UP'   ? fastMid : null;
               const downMid = openForMarket.side === 'DOWN' ? fastMid : null;
-              const reason  = isPreSettle ? 'pre-settle' : 'stop';
-              console.log(`[stopwatch] mid=${fastMid.toFixed(3)} | ${reason} tetiklendi!`);
+              console.log(`[stopwatch] mid=${fastMid.toFixed(3)} <= stop=${openForMarket.stop_price} — hizli stop!`);
               await updateScalpLive(db, market, upMid, downMid);
             }
           }

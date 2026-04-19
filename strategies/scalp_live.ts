@@ -48,13 +48,6 @@ const MIN_HOLD_BEFORE_STOP = 60;  // saniye
 // stop_price'dan bu kadar asagi duserse MIN_HOLD bypass edilir (gercek crash)
 const CRASH_BYPASS_DIST = 0.07;
 
-// Pre-settlement panic exit: T10117 tipi full kayiplari onlemek icin
-// Market kapanmadan PRE_SETTLE_SEC saniye once, mid < PRE_SETTLE_THRESHOLD ise cik.
-// Ornek T10117: mid=0.945, remaining=27s → cikis @0.944 → pnl +$0.09
-//               (settlement_loss=-$5.52 yerine)
-const PRE_SETTLE_SEC       = 35;   // Bu kadar saniye kaldiysa pre-settle kontrolu yap
-const PRE_SETTLE_THRESHOLD = 0.97; // Bu degerin altinda → uncertain → cik
-
 // CLOB order parametreleri
 const TICK_SIZE   = '0.01';
 const FOK_FEE_BPS = 1000;
@@ -224,10 +217,15 @@ export async function checkScalpLive(
 /**
  * Acik pozisyonlari izle.
  *
- * 3 cikis tetikleyicisi:
+ * 2 cikis tetikleyicisi:
  *   1. Normal stop: mid <= stop_price + MIN_HOLD gecti
- *   2. Pre-settlement (T10117 fix): remaining < 35s + mid < 0.97 + MIN_HOLD gecti
- *   3. Force/post-close (force=true): stop_price ve hold kontrolu yok
+ *   2. Force/post-close (force=true): stop_price ve hold kontrolu yok
+ *      → index.ts'den POST_CLOSE_WINDOW_SEC icinde cagirilir
+ *
+ * NOT: Pre-settlement exit (remaining<35s) DEVRE DISI.
+ *   Veri: WIN trade'lerin %37'si son 35s'de hala 0.97 altinda —
+ *   token 1.0'a son saniyede ziplayabiliyor. Threshold belirlemek icin
+ *   yetersiz sinyal. T10117 bu kategoride zaten (%8 ihtimal gerceklesti).
  *
  * FOK cascade: mid-0.01, mid-0.03, mid-0.06, mid-0.10
  */
@@ -236,7 +234,7 @@ export async function updateScalpLive(
   market: BtcMarket,
   upMid:   number | null,
   downMid: number | null,
-  force    = false,
+  force    = false,  // true = post-close emergency exit (stop_price/MIN_HOLD atlaniyor)
 ): Promise<void> {
   const open = db.prepare(`
     SELECT * FROM live_trades
@@ -259,32 +257,7 @@ export async function updateScalpLive(
     const holdTime  = now - t.entry_ts;
     const remaining = market.closeTime - now;
 
-    // ── Pre-settlement panic exit (T10117 fix) ───────────────────────────────
-    // T10117: mid=0.945 iken market kapandi, stop@0.86 hic tetiklenmemisti.
-    // Fix: remaining < 35s ve mid < 0.97 ise FOK ile cik.
-    // Etki: @0.944 cikis → +$0.09 kazanc vs settlement_loss=-$5.52
-    const isPreSettle = !force
-      && remaining >= 0 && remaining <= PRE_SETTLE_SEC
-      && holdTime >= MIN_HOLD_BEFORE_STOP
-      && mid < PRE_SETTLE_THRESHOLD;
-
-    if (isPreSettle) {
-      console.log(
-        `[live] PRE-SETTLE EXIT T${t.id} | remaining=${remaining}s` +
-        ` | ${t.side} mid=${mid} < ${PRE_SETTLE_THRESHOLD}` +
-        ` | hold=${holdTime}s — settlement riski, panik cikis`,
-      );
-      if (t.stop_order_id) {
-        try {
-          const client = await getClobClient();
-          await client.cancelOrder({ orderID: t.stop_order_id });
-          console.log(`[live] GTC STOP iptal edildi (pre-settle)`);
-        } catch(e: any) {
-          console.warn(`[live] GTC STOP iptal uyari (pre-settle): ${e.message}`);
-        }
-      }
-      // isPreSettle=true → stop_price check atlandi, asagidaki FOK cascade calisir
-    } else if (!force) {
+    if (!force) {
       // ── Normal stop check ─────────────────────────────────────────────────
       if (mid > t.stop_price) continue;
 
@@ -309,9 +282,9 @@ export async function updateScalpLive(
         }
       }
     }
-    // force=true → MIN_HOLD ve stop_price kontrolu yok
+    // force=true → MIN_HOLD ve stop_price kontrolu yok (post-close emergency exit)
 
-    const exitLabel = isPreSettle ? 'PRE-SETTLE' : force ? 'FORCE/POST-CLOSE' : 'STOP';
+    const exitLabel = force ? 'FORCE/POST-CLOSE' : 'STOP';
     console.log(
       `[live] EXIT ${exitLabel} ${t.side}` +
       ` | mid=${mid} | stop=${t.stop_price} | hold=${holdTime}s | remaining=${remaining}s`,
@@ -320,8 +293,8 @@ export async function updateScalpLive(
     try {
       const client = await getClobClient();
 
-      // GTC stop kontrol (isPreSettle'da zaten iptal ettik)
-      if (!isPreSettle && t.stop_order_id) {
+      // GTC stop kontrol
+      if (t.stop_order_id) {
         try {
           const orderInfo = await client.getOrder(t.stop_order_id);
           const status = (orderInfo as any).status;
@@ -426,11 +399,9 @@ export async function updateScalpLive(
         continue;
       }
 
-      const exitReason = isPreSettle
-        ? `pre_settle_fok_${attemptIndex + 1}`
-        : force
-          ? `post_close_fok_${attemptIndex + 1}`
-          : `stop_fok_${attemptIndex + 1}`;
+      const exitReason = force
+        ? `post_close_fok_${attemptIndex + 1}`
+        : `stop_fok_${attemptIndex + 1}`;
       const pnl = filledPrice * stopSellSize - t.entry_price * t.shares;
 
       db.prepare(`
