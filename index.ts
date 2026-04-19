@@ -24,6 +24,9 @@ const DURATION_FILTER = [5];
 // bu pencere kadar daha izlemeye devam et.
 const POST_CLOSE_WINDOW_SEC = 300; // 5 dakika
 
+// Son 30s yoğun izleme: bu Set'te olan market_id'ler için async 2s poll başlatılmış
+const intensivePollActive = new Set<string>();
+
 const lastSnapshotElapsed = new Map<string, number | null>();
 
 async function tick(
@@ -65,6 +68,51 @@ async function tick(
           }
         } catch(e: any) {
           // Stop watch hatalari session'i engellemez
+        }
+
+        // SON 30S YOGUN IZLEME — her 2s'de bir poll (10s gozluk penceresi kapatilir)
+        // Ornek: fiyat 0.85'e iner, 2s sonra 0.88'e cikabilir.
+        // 10s stopwatch bu dipi kacirir; 2s poll yakalar.
+        // NOT: T10117 gibi stop HICBIR ZAMAN tetiklenmemis senaryolara yardimi yok.
+        if (remaining <= 30 && remaining > 0 && !intensivePollActive.has(market.id)) {
+          intensivePollActive.add(market.id);
+          const capturedMarket = { ...market };
+          const capturedOpen   = { ...openForMarket };
+
+          // Non-blocking: tick() bloklanmaz, arka planda calisir
+          (async () => {
+            const polls = Math.ceil(remaining / 2) + 5; // close'a kadar + 5 ekstra
+            console.log(`[last30s] T${capturedOpen.id} yogun izleme basliyor — ${remaining}s kaldi, ${polls} poll x 2s`);
+            for (let i = 0; i < polls; i++) {
+              await new Promise(r => setTimeout(r, 2000));
+              try {
+                // Hala OPEN mi?
+                const stillOpen = db.prepare(
+                  `SELECT id, side, token_id, stop_price FROM live_trades WHERE market_id=? AND outcome='OPEN' LIMIT 1`
+                ).get(capturedMarket.id) as { id: number; side: string; token_id: string; stop_price: number } | undefined;
+                if (!stillOpen) break; // Kapatilmis, izlemeyi bitirelim
+
+                const freshBook = await fetchBook(stillOpen.token_id);
+                if (freshBook && freshBook.bids.length > 0 && freshBook.asks.length > 0) {
+                  const bid = Number(freshBook.bids.at(-1)!.price);
+                  const ask = Number(freshBook.asks.at(-1)!.price);
+                  const fastMid = (bid + ask) / 2;
+                  const nowTs   = Math.floor(Date.now() / 1000);
+                  const rem     = capturedMarket.closeTime - nowTs;
+                  console.log(`[last30s] T${stillOpen.id} mid=${fastMid.toFixed(3)} stop=${stillOpen.stop_price} rem=${rem}s`);
+                  if (fastMid <= stillOpen.stop_price) {
+                    const upMid   = stillOpen.side === 'UP'   ? fastMid : null;
+                    const downMid = stillOpen.side === 'DOWN' ? fastMid : null;
+                    console.log(`[last30s] STOP TETIKLENDI mid=${fastMid.toFixed(3)} — FOK cascade!`);
+                    await updateScalpLive(db, capturedMarket as BtcMarket, upMid, downMid);
+                    break;
+                  }
+                }
+              } catch { /* devam et */ }
+            }
+            intensivePollActive.delete(capturedMarket.id);
+            console.log(`[last30s] T${capturedOpen.id} yogun izleme bitti`);
+          })();
         }
       }
     }
