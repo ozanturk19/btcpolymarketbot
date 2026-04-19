@@ -1,10 +1,10 @@
 /**
  * index.ts — Ana orchestrator
- * Kullanım:
+ * Kullanim:
  *   ts-node index.ts --mode=observe   (sadece veri topla)
  *   ts-node index.ts --mode=paper     (veri topla + paper trade)
- *   ts-node index.ts --mode=live      (gerçek para,  trade)
- *   ts-node index.ts --mode=report    (özet rapor yazdır)
+ *   ts-node index.ts --mode=live      (gercek para, trade)
+ *   ts-node index.ts --mode=report    (ozet rapor yazdir)
  */
 
 import { openDb } from './db/schema';
@@ -17,8 +17,12 @@ import { checkScalpLive, updateScalpLive, resolveScalpLive } from './strategies/
 import { initClobClient, isClobReady } from './live/client';
 import { autoRedeemWins } from './live/redeem';
 
-const MODE = process.argv.find(a => a.startsWith('--mode='))?.split('=')[1] ?? 'observe'; // observe|paper|live|both|report
-const DURATION_FILTER = [5]; // sadece 5dk — trade + snapshot
+const MODE = process.argv.find(a => a.startsWith('--mode='))?.split('=')[1] ?? 'observe';
+const DURATION_FILTER = [5];
+
+// Post-close monitoring: market activeMarkets'tan cikinca acik pozisyon varsa
+// bu pencere kadar daha izlemeye devam et.
+const POST_CLOSE_WINDOW_SEC = 300; // 5 dakika
 
 const lastSnapshotElapsed = new Map<string, number | null>();
 
@@ -37,11 +41,7 @@ async function tick(
 
     const lastElapsed = lastSnapshotElapsed.get(market.id) ?? null;
 
-    // ─── HIZLI STOP KONTROLÜ ───────────────────────────────────────────────
-    // Snapshot döngüsünden BAĞIMSIZ — her 10s'de çalışır.
-    // Sorun: shouldSnapshot elapsed=120-240s arasında 60s'de bir true döner.
-    // Bu 60s'lik körlük penceresinde market stop seviyesini gap-through edebilir.
-    // Fix: Açık pozisyon varsa her tick'te fresh orderbook çekip stop kontrol et.
+    // HIZLI STOP KONTROLU — Snapshot dongusu ile bagimsiz, her 10s calisir.
     if ((MODE === 'live' || MODE === 'both') && isClobReady()) {
       const openForMarket = db.prepare(
         `SELECT id, side, token_id, stop_price FROM live_trades WHERE market_id=? AND outcome='OPEN'`
@@ -50,26 +50,28 @@ async function tick(
       if (openForMarket) {
         try {
           const book = await fetchBook(openForMarket.token_id);
-          // Monitoring log: her 10s'de bir timing testi için
           const swNow = new Date().toISOString().slice(11,19);
-          console.log(`[stopwatch] 🔍 ${swNow} | T${openForMarket.id} ${openForMarket.side} stop=${openForMarket.stop_price}`);
+          console.log(`[stopwatch] ${swNow} | T${openForMarket.id} ${openForMarket.side} stop=${openForMarket.stop_price}`);
           if (book && book.bids.length > 0 && book.asks.length > 0) {
             const bestBid = Number(book.bids.at(-1)!.price);
             const bestAsk = Number(book.asks.at(-1)!.price);
             const fastMid = (bestBid + bestAsk) / 2;
-            if (fastMid <= openForMarket.stop_price) {
+            // Stop kontrolu VEYA pre-settle kontrolu
+            const isStop       = fastMid <= openForMarket.stop_price;
+            const isPreSettle  = remaining >= 0 && remaining <= 35 && fastMid < 0.97;
+            if (isStop || isPreSettle) {
               const upMid   = openForMarket.side === 'UP'   ? fastMid : null;
               const downMid = openForMarket.side === 'DOWN' ? fastMid : null;
-              console.log(`[stopwatch] ⚡ mid=${fastMid.toFixed(3)} ≤ stop=${openForMarket.stop_price} — hızlı stop!`);
+              const reason  = isPreSettle ? 'pre-settle' : 'stop';
+              console.log(`[stopwatch] mid=${fastMid.toFixed(3)} | ${reason} tetiklendi!`);
               await updateScalpLive(db, market, upMid, downMid);
             }
           }
         } catch(e: any) {
-          // Stop watch hataları session'ı engellemez
+          // Stop watch hatalari session'i engellemez
         }
       }
     }
-    // ──────────────────────────────────────────────────────────────────────────
 
     if (shouldSnapshot(market, lastElapsed)) {
       await takeSnapshot(db, market, btcPrice);
@@ -97,15 +99,85 @@ async function tick(
 
       console.log(
         `[tick] ${market.durationMin}min | ${market.question.slice(0,35).padEnd(35)}` +
-        ` | ${remaining}s kaldı | up=${up_best_price?.toFixed(3)} dn=${down_best_price?.toFixed(3)}` +
+        ` | ${remaining}s kaldi | up=${up_best_price?.toFixed(3)} dn=${down_best_price?.toFixed(3)}` +
         ` | BTC=$${btcPrice?.toFixed(0) ?? '?'}`
       );
+    }
+  }
+
+  // POST-CLOSE MONITORING
+  // activeMarkets'tan cikmis ama henuz settle olmamis marketlerdeki
+  // acik pozisyonlari POST_CLOSE_WINDOW_SEC boyunca izle.
+  // Senaryo: market 08:35'te kapandi, bot 08:36'da activeMarkets'tan cikardi.
+  // Ama outcome onaylama 5-10 dk surer → bu pencerede emergency exit dene.
+  if ((MODE === 'live' || MODE === 'both') && isClobReady()) {
+    type PostCloseRow = {
+      id: string; question: string; duration_min: number;
+      token_up: string|null; token_down: string|null;
+      open_time: number; close_time: number; outcome: string|null;
+      lt_side: string; lt_token_id: string;
+    };
+
+    const closedWithOpen = db.prepare(`
+      SELECT DISTINCT m.id, m.question, m.duration_min, m.token_up, m.token_down,
+             m.open_time, m.close_time, m.outcome,
+             lt.side as lt_side, lt.token_id as lt_token_id
+      FROM markets m
+      JOIN live_trades lt ON lt.market_id = m.id
+      WHERE lt.outcome = 'OPEN'
+        AND m.close_time < ?
+        AND m.close_time > ?
+    `).all(now, now - POST_CLOSE_WINDOW_SEC) as PostCloseRow[];
+
+    for (const row of closedWithOpen) {
+      // Hala activeMarkets'ta ise ana dongu zaten izliyor
+      if (activeMarkets.has(row.id)) continue;
+
+      const secsAfterClose = now - row.close_time;
+      console.log(
+        `[post-close] Market ${row.id.slice(0,8)} kapali ${secsAfterClose}s — ` +
+        `acik pozisyon var, emergency exit deneniyor...`
+      );
+
+      try {
+        const book = await fetchBook(row.lt_token_id);
+        if (book && book.bids.length > 0 && book.asks.length > 0) {
+          const bestBid = Number(book.bids.at(-1)!.price);
+          const bestAsk = Number(book.asks.at(-1)!.price);
+          const fastMid = (bestBid + bestAsk) / 2;
+
+          console.log(
+            `[post-close] ${row.lt_side} token mid=${fastMid.toFixed(3)}` +
+            ` | bid=${bestBid.toFixed(3)} ask=${bestAsk.toFixed(3)}`
+          );
+
+          const mkt: BtcMarket = {
+            id: row.id, question: row.question, durationMin: row.duration_min,
+            tokenUp: row.token_up, tokenDown: row.token_down,
+            openTime: row.open_time, closeTime: row.close_time,
+            outcome: (row.outcome as 'UP' | 'DOWN') ?? null,
+            upPrice: 0, downPrice: 0, upBid: null, upAsk: null,
+            downBid: null, downAsk: null, volume24h: 0, liquidity: 0,
+            acceptingOrders: false,
+          };
+
+          const upMid   = row.lt_side === 'UP'   ? fastMid : null;
+          const downMid = row.lt_side === 'DOWN' ? fastMid : null;
+
+          // force=true: stop_price ve MIN_HOLD kontrolu yok, direkt FOK cascade
+          await updateScalpLive(db, mkt, upMid, downMid, true);
+        } else {
+          console.log(`[post-close] Order book bos — piyasa ilikidit yok, settlement bekleniyor`);
+        }
+      } catch(e: any) {
+        console.error(`[post-close] Hata: ${e.message}`);
+      }
     }
   }
 }
 
 async function main(): Promise<void> {
-  console.log(`\n🤖 Polymarket BTC Bot — mode=${MODE.toUpperCase()}`);
+  console.log(`\n Polymarket BTC Bot — mode=${MODE.toUpperCase()}`);
   console.log('='.repeat(60));
 
   if (MODE === 'report') {
@@ -117,7 +189,6 @@ async function main(): Promise<void> {
   const btcFeed = new BtcPriceFeed(db);
   btcFeed.start();
 
-  // Live mod: CLOB client'ı startup'ta başlat ve test et
   if (MODE === 'live' || MODE === 'both') {
     await initClobClient();
   }
@@ -139,10 +210,10 @@ async function main(): Promise<void> {
         if (!lastSnapshotElapsed.has(m.id)) lastSnapshotElapsed.set(m.id, null);
       }
 
-      // Biten marketleri resolve et (DB'de outcome güncelle)
+      // Biten marketleri resolve et (DB'de outcome guncelle)
       await resolveMarkets(db);
 
-      // Paper/Live: kapanmış marketlerdeki trade'leri kapat
+      // Paper/Live: kapanmis marketlerdeki trade'leri kapat
       if (MODE === 'paper' || MODE === 'live' || MODE === 'both') {
         const resolvedMarkets = db.prepare(`
           SELECT DISTINCT m.id, m.outcome, m.question, m.duration_min,
@@ -170,7 +241,6 @@ async function main(): Promise<void> {
           if (MODE === 'paper' || MODE === 'both') resolveScalpTrades(db, mkt);
           if (MODE === 'live' || MODE === 'both') await resolveScalpLive(db, mkt);
         }
-        // WIN tokenları otomatik redeem et (live modda)
         if (MODE === 'live' || MODE === 'both') {
           await autoRedeemWins(db);
         }
@@ -185,21 +255,26 @@ async function main(): Promise<void> {
   setInterval(() => tick(db, btcFeed, activeMarkets).catch(console.error), 10_000);
   setInterval(() => printQuickStats(db), 3_600_000);
 
-  console.log('✅ Bot çalışıyor. Ctrl+C ile dur.\n');
+  console.log('Bot calisiyor. Ctrl+C ile dur.\n');
 
-  process.on('SIGINT', () => {
-    console.log('\n[bot] Durduruluyor...');
+  const shutdown = (sig: string) => {
+    console.log(`\n[bot] Durduruluyor (${sig})...`);
     btcFeed.stop();
     db.close();
     process.exit(0);
+  };
+  process.on('SIGINT',  () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  process.on('unhandledRejection', (reason) => {
+    console.error('[bot] Unhandled rejection:', reason);
   });
 }
 
 function printQuickStats(db: ReturnType<typeof openDb>): void {
   const t = new Date().toISOString().slice(11, 16);
-  console.log(`\n📊 ===== RAPOR ${t} UTC =====`);
+  console.log(`\n RAPOR ${t} UTC`);
 
-  // ── LIVE ──────────────────────────────────────────
   const live = db.prepare(`
     SELECT
       SUM(CASE WHEN outcome='WIN'  THEN 1 ELSE 0 END) as wins,
@@ -215,14 +290,13 @@ function printQuickStats(db: ReturnType<typeof openDb>): void {
     const total = (live.wins ?? 0) + (live.losses ?? 0);
     const wr    = total > 0 ? (((live.wins ?? 0) / total) * 100).toFixed(1) : '—';
     console.log(
-      `💰 LIVE   | ${live.wins ?? 0}W / ${live.losses ?? 0}L | %${wr} WR` +
+      `LIVE   | ${live.wins ?? 0}W / ${live.losses ?? 0}L | %${wr} WR` +
       ` | Net: $${(live.total_pnl ?? 0).toFixed(3)}` +
       ` | AvgWin: $${(live.avg_win ?? 0).toFixed(3)} AvgLoss: $${(live.avg_loss ?? 0).toFixed(3)}` +
-      (live.open ? ` | ⚠️  ${live.open} AÇIK` : ' | 0 açık'),
+      (live.open ? ` | ${live.open} ACIK` : ' | 0 acik'),
     );
   }
 
-  // ── PAPER ─────────────────────────────────────────
   const pstats = db.prepare(`
     SELECT outcome,
            COUNT(*) as c,
@@ -240,9 +314,9 @@ function printQuickStats(db: ReturnType<typeof openDb>): void {
     const pwr  = ptot > 0 ? (((pw?.c ?? 0) / ptot) * 100).toFixed(1) : '—';
     const pnl  = (pw?.pnl ?? 0) + (pl?.pnl ?? 0);
     console.log(
-      `📄 PAPER  | ${pw?.c ?? 0}W / ${pl?.c ?? 0}L | %${pwr} WR` +
+      `PAPER  | ${pw?.c ?? 0}W / ${pl?.c ?? 0}L | %${pwr} WR` +
       ` | Net: $${pnl.toFixed(2)}` +
-      (po?.c ? ` | ${po.c} açık` : '') +
+      (po?.c ? ` | ${po.c} acik` : '') +
       (pp?.c ? ` | ${pp.c} bekliyor` : ''),
     );
   }
@@ -252,7 +326,7 @@ function printQuickStats(db: ReturnType<typeof openDb>): void {
 
 function printReport(): void {
   const db = openDb();
-  console.log('\n📈 KAPSAMLI RAPOR\n' + '='.repeat(60));
+  console.log('\n KAPSAMLI RAPOR\n' + '='.repeat(60));
 
   const marketStats = db.prepare(`
     SELECT duration_min, COUNT(*) as total,
@@ -262,9 +336,9 @@ function printReport(): void {
     FROM markets GROUP BY duration_min
   `).all() as { duration_min: number; total: number; resolved: number; up_wins: number; down_wins: number }[];
 
-  console.log('\n🕐 Market İstatistikleri:');
+  console.log('\n Market Istatistikleri:');
   for (const m of marketStats) {
-    console.log(`  ${m.duration_min}dk: ${m.resolved}/${m.total} çözüldü | UP=${m.up_wins} DOWN=${m.down_wins}`);
+    console.log(`  ${m.duration_min}dk: ${m.resolved}/${m.total} cozuldu | UP=${m.up_wins} DOWN=${m.down_wins}`);
   }
 
   printQuickStats(db);
