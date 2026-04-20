@@ -128,7 +128,7 @@ export async function checkScalpLive(
   downAsk: number | null,
   elapsed: number,
 ): Promise<void> {
-  if (market.durationMin !== 5 && market.durationMin !== 15) return;
+  if (market.durationMin !== 5) return; // 15dk devre disi: stop rate %45.8, WR %54.2 (2026-04-20 analiz)
 
   const now       = Math.floor(Date.now() / 1000);
   const remaining = market.closeTime - now;
