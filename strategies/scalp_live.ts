@@ -49,9 +49,9 @@ const ELAPSED_MAX_5  = 240;
 const REMAINING_MIN_5 = 60;
 
 // 15-dk market parametreleri (paper data: 0.90-0.93 bandi WR %76, avg +$0.333)
-const ENTRY_MIN_15    = 0.90;
-const ENTRY_MAX_15    = 0.93;
-const ELAPSED_MIN_15  = 180;
+const ENTRY_MIN_15    = 0.91;
+const ENTRY_MAX_15    = 0.92;
+const ELAPSED_MIN_15  = 500;  // 900-500=400s maks kalan (200-400s penceresi)
 const ELAPSED_MAX_15  = 750;  // 900s market'ta 750s elapsed = 150s kalan (>= REMAINING_MIN_15)
 const REMAINING_MIN_15 = 120;
 
@@ -128,7 +128,7 @@ export async function checkScalpLive(
   downAsk: number | null,
   elapsed: number,
 ): Promise<void> {
-  if (market.durationMin !== 5) return; // 15dk devre disi: stop rate %45.8, WR %54.2 (2026-04-20 analiz)
+  if (market.durationMin !== 5 && market.durationMin !== 15) return;
 
   const now       = Math.floor(Date.now() / 1000);
   const remaining = market.closeTime - now;
@@ -307,6 +307,8 @@ export async function updateScalpLive(
 
     const holdTime  = now - t.entry_ts;
     const remaining = market.closeTime - now;
+    // 5dk: 30s | 15dk: 60s — duration-aware circuit breaker esigi
+    const cbRemaining = market.durationMin === 15 ? 60 : CIRCUIT_BREAKER_REMAINING;
 
     // -- Exit tetikleyici karar --
     let exitTrigger: 'stop' | 'circuit_breaker' | 'force' | null = null;
@@ -323,7 +325,7 @@ export async function updateScalpLive(
             ` ama mid=${mid} crash (stop=${t.stop_price}, diff=${crashDiff.toFixed(3)} > ${CRASH_BYPASS_DIST})`,
           );
           exitTrigger = 'stop';
-        } else if (remaining >= CIRCUIT_BREAKER_REMAINING) {
+        } else if (remaining >= cbRemaining) {
           console.log(
             `[live] STOP ERKEN hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
             ` | remaining=${remaining}s | diff=${crashDiff.toFixed(3)} -- bekleniyor`,
@@ -331,20 +333,20 @@ export async function updateScalpLive(
           // exitTrigger null kalir, asagida continue tetiklenir
         } else {
           console.log(
-            `[live] STOP ERKEN ama remaining=${remaining}s < ${CIRCUIT_BREAKER_REMAINING}s -- acil cikis`,
+            `[live] STOP ERKEN ama remaining=${remaining}s < ${cbRemaining}s -- acil cikis`,
           );
           exitTrigger = 'stop';
         }
       } else {
         exitTrigger = 'stop';
       }
-    } else if (remaining > 0 && remaining <= CIRCUIT_BREAKER_REMAINING && mid < CIRCUIT_BREAKER_THRESHOLD) {
+    } else if (remaining > 0 && remaining <= cbRemaining && mid < CIRCUIT_BREAKER_THRESHOLD) {
       // CIRCUIT BREAKER: sure azaldi, fiyat belirsiz -- settlement riskini kapat
       // Senaryo: mid 0.87-0.95, stop tetiklenmemis, market LOSS resolve edebilir
       exitTrigger = 'circuit_breaker';
       console.log(
         `[live] CIRCUIT BREAKER T${t.id} ${t.side}` +
-        ` | remaining=${remaining}s <= ${CIRCUIT_BREAKER_REMAINING}s` +
+        ` | remaining=${remaining}s <= ${cbRemaining}s` +
         ` | mid=${mid} < ${CIRCUIT_BREAKER_THRESHOLD}` +
         ` | stop=${t.stop_price} (stop tetiklenmemisti)`,
       );
