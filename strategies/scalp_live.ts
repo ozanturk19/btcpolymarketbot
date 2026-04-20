@@ -142,14 +142,34 @@ export async function checkScalpLive(
 
   if (elapsed < elapsedMin || elapsed > elapsedMax || remaining < remainingMin) return;
 
-  const sides: [string, number | null, string | null][] = [
-    ['UP',   upAsk,   market.tokenUp],
-    ['DOWN', downAsk, market.tokenDown],
+  // ── Saat filtresi ───────────────────────────────────────────────────────────
+  // 15:00 UTC: analiz WR=%48.4 (486 trade) — en kötü saat, girme
+  // Kaynak: analyze.ts saatlik detay tablosu
+  const hourUtc = new Date().getUTCHours();
+  if (hourUtc === 15) {
+    return;
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
+  const sides: [string, number | null, number | null, string | null][] = [
+    ['UP',   upAsk,   upMid,   market.tokenUp],
+    ['DOWN', downAsk, downMid, market.tokenDown],
   ];
 
-  for (const [side, ask, tokenId] of sides) {
+  for (const [side, ask, sideMid, tokenId] of sides) {
     if (!ask || !tokenId) continue;
     if (ask < entryMin || ask > entryMax) continue;
+
+    // ── Spread filtresi ──────────────────────────────────────────────────────
+    // spread = ask - bid = 2*(ask - mid) — analiz: spread>0.01 WR=%40'a düşüyor
+    if (sideMid !== null) {
+      const spread = Math.round(2 * (ask - sideMid) * 100) / 100;
+      if (spread > 0.01) {
+        console.log();
+        continue;
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     const openCount = (db.prepare(
       `SELECT COUNT(*) as n FROM live_trades WHERE outcome='OPEN'`,
