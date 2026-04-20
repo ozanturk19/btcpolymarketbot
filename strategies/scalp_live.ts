@@ -52,7 +52,7 @@ const REMAINING_MIN_5 = 60;
 const ENTRY_MIN_15    = 0.90;
 const ENTRY_MAX_15    = 0.93;
 const ELAPSED_MIN_15  = 180;
-const ELAPSED_MAX_15  = 600;
+const ELAPSED_MAX_15  = 750;  // 900s market'ta 750s elapsed = 150s kalan (>= REMAINING_MIN_15)
 const REMAINING_MIN_15 = 120;
 
 // Circuit breaker: kapanmaya yakin ve fiyat belirsizse garantili cikis
@@ -63,6 +63,9 @@ const CIRCUIT_BREAKER_THRESHOLD  = 0.96; // mid bu esik altinda + remaining<=30s
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye
 // stop_price'dan bu kadar asagi duserse MIN_HOLD bypass edilir (gercek crash)
 const CRASH_BYPASS_DIST = 0.07;
+
+// Eşzamanlı maksimum açık pozisyon sayısı
+const MAX_CONCURRENT = 3;
 
 // CLOB order parametreleri
 const TICK_SIZE   = '0.01';
@@ -148,10 +151,15 @@ export async function checkScalpLive(
     if (!ask || !tokenId) continue;
     if (ask < entryMin || ask > entryMax) continue;
 
-    const exists = db.prepare(`
-      SELECT id FROM live_trades WHERE outcome='OPEN'
-    `).get();
-    if (exists) continue;
+    const openCount = (db.prepare(
+      `SELECT COUNT(*) as n FROM live_trades WHERE outcome='OPEN'`,
+    ).get() as { n: number }).n;
+    if (openCount >= MAX_CONCURRENT) continue;
+
+    const sameMarketOpen = db.prepare(
+      `SELECT id FROM live_trades WHERE market_id=? AND outcome='OPEN'`,
+    ).get(market.id);
+    if (sameMarketOpen) continue;
 
     const entryPrice = roundTick(ask + 0.01);
     const shares = Math.max(6, Math.round(SIZE_USD / entryPrice) + 1);

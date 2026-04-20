@@ -58,7 +58,7 @@ export function checkScalp(
   // 15dk market: elapsed 240-720s (ilk 4dk belirsiz, 720s+ margin kalmaz)
   const is15min    = market.durationMin >= 10;
   const elapsedMin = is15min ? 240 : 90;
-  const elapsedMax = is15min ? 720 : 240;
+  const elapsedMax = is15min ? 750 : 240;
   if (elapsed < elapsedMin || elapsed > elapsedMax || remaining < 60) return;
 
   for (const [side, mid, ask] of [
