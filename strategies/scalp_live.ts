@@ -215,7 +215,7 @@ export async function checkScalpLive(
 
       // Token bakiyesi onaylanana kadar bekle
       let confirmedBalance = 0;
-      for (let poll = 0; poll < 12; poll++) {
+      for (let poll = 0; poll < 20; poll++) {
         await new Promise(r => setTimeout(r, 1000));
         try {
           const balRes = await client.getBalanceAllowance({
@@ -238,6 +238,8 @@ export async function checkScalpLive(
       // GTC STOP @ stop_price
       let stopOrderId: string | null = null;
       if (confirmedBalance >= 5) {
+        // CLOB allowance sync için 2s bekle ("balance: 0" hata azaltma)
+        await new Promise(r => setTimeout(r, 2000));
         try {
           const stopOrder = await client.createOrder(
             { tokenID: tokenId, price: stopPrice, side: Side.SELL, size: confirmedBalance, feeRateBps: GTC_FEE_BPS },
