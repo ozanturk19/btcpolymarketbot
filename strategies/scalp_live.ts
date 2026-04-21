@@ -57,7 +57,7 @@ const REMAINING_MIN_15 = 120;
 
 // Circuit breaker: kapanmaya yakin ve fiyat belirsizse garantili cikis
 const CIRCUIT_BREAKER_REMAINING  = 30;   // saniye kaldiysa tetikle
-const CIRCUIT_BREAKER_THRESHOLD  = 0.96; // mid bu esik altinda + remaining<=30s -> acil sat
+const CIRCUIT_BREAKER_THRESHOLD  = 0.87; // mid bu esik altinda + remaining<=30s -> acil sat (0.87 = stop seviyesi alti, gercek crash korumasi)
 
 // Fake stop engelleme: giris sonrasi bu kadar saniye gecmeden stop tetiklenemez.
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye
@@ -310,7 +310,7 @@ export async function updateScalpLive(
       } else {
         exitTrigger = 'stop';
       }
-    } else if (remaining > 0 && remaining <= CIRCUIT_BREAKER_REMAINING && mid < CIRCUIT_BREAKER_THRESHOLD) {
+    } else if (remaining > 0 && remaining <= CIRCUIT_BREAKER_REMAINING && (mid == null || mid < CIRCUIT_BREAKER_THRESHOLD)) {
       // CIRCUIT BREAKER: sure azaldi, fiyat belirsiz -- settlement riskini kapat
       // Senaryo: mid 0.87-0.95, stop tetiklenmemis, market LOSS resolve edebilir
       exitTrigger = 'circuit_breaker';
