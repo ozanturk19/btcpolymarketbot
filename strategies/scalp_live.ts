@@ -39,7 +39,7 @@ import { Side, OrderType, AssetType } from '@polymarket/clob-client';
 
 const SIZE_USD   = 5;     // ~$4.60 per trade — CLOB min order = 5 shares
 // TARGET kaldirildi — settlement 1.00 oder, ayrica SELL limit gerekmez
-const STOP_DIST  = 0.06;
+const STOP_PRICE_ABS = 0.75;  // mutlak stop seviyesi — 0.91-0.92 entry icin ~0.16-0.17 risk
 
 // 5-dk market parametreleri
 const ENTRY_MIN_5    = 0.91;
@@ -59,7 +59,7 @@ const REMAINING_MIN_15 = 120;
 const CIRCUIT_BREAKER_REMAINING  = 30;   // saniye kaldiysa tetikle
 const CIRCUIT_BREAKER_THRESHOLD  = 0.87; // mid bu esik altinda + remaining<=30s -> acil sat (0.87 = stop seviyesi alti, gercek crash korumasi)
 // Derin crash: mid bu seviyenin altina duserse remaining/holdTime'dan bagimsiz aninda cikis
-const DEEP_CRASH_THRESHOLD = 0.80;
+const DEEP_CRASH_THRESHOLD = 0.70;  // stop 0.75 altinda, double-exit onle
 
 // Fake stop engelleme: giris sonrasi bu kadar saniye gecmeden stop tetiklenemez.
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye
@@ -157,7 +157,7 @@ export async function checkScalpLive(
 
     const entryPrice = roundTick(ask + 0.01);
     const shares = Math.max(6, Math.round(SIZE_USD / entryPrice) + 1);
-    const stopPrice  = roundTick(entryPrice - STOP_DIST);
+    const stopPrice  = STOP_PRICE_ABS;
 
     console.log(
       `[live] SINYAL ${side} @${entryPrice} | ${shares} share` +
@@ -503,6 +503,29 @@ export async function resolveScalpLive(db: Db, market: BtcMarket): Promise<void>
   }[];
 
   for (const t of open) {
+    // GTC stop daha once dolmuşsa settlement_win hatali olur — once kontrol et
+    if (t.stop_order_id) {
+      try {
+        const client2 = await getClobClient();
+        const stopInfo = await client2.getOrder(t.stop_order_id);
+        const stopMatched = parseFloat((stopInfo as any).size_matched ?? "0");
+        if (stopMatched > 0) {
+          const stopFilledPrice = parseFloat((stopInfo as any).price ?? String(t.stop_price));
+          const pnl2 = stopFilledPrice * stopMatched - t.entry_price * t.shares;
+          db.prepare(`
+            UPDATE live_trades
+            SET exit_price=?, exit_ts=?, exit_reason=stop_gtc_filled,
+                pnl=?, pnl_pct=?, outcome=LOSS
+            WHERE id=?
+          `).run(stopFilledPrice, now, pnl2,
+            ((stopFilledPrice - t.entry_price) / t.entry_price) * 100, t.id);
+          console.log(`[live] RESOLVE: GTC stop onceden dolmuş @${stopFilledPrice} | pnl=$${ pnl2.toFixed(3)} — settlement_win degil`);
+          continue;
+        }
+      } catch(e: any) {
+        console.warn(`[live] RESOLVE: stop kontrol hatasi: ${e.message} — settlement devam`);
+      }
+    }
     const won       = t.side === market.outcome;
     const exitPrice = won ? 1.0 : 0.0;
     const pnl       = (exitPrice - t.entry_price) * t.shares;
