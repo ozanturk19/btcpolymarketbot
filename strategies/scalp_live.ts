@@ -514,11 +514,11 @@ export async function resolveScalpLive(db: Db, market: BtcMarket): Promise<void>
           const pnl2 = stopFilledPrice * stopMatched - t.entry_price * t.shares;
           db.prepare(`
             UPDATE live_trades
-            SET exit_price=?, exit_ts=?, exit_reason=stop_gtc_filled,
-                pnl=?, pnl_pct=?, outcome=LOSS
+            SET exit_price=?, exit_ts=?, exit_reason=?,
+                pnl=?, pnl_pct=?, outcome=?
             WHERE id=?
-          `).run(stopFilledPrice, now, pnl2,
-            ((stopFilledPrice - t.entry_price) / t.entry_price) * 100, t.id);
+          `).run(stopFilledPrice, now, 'stop_gtc_filled', pnl2,
+            ((stopFilledPrice - t.entry_price) / t.entry_price) * 100, 'LOSS', t.id);
           console.log(`[live] RESOLVE: GTC stop onceden dolmuş @${stopFilledPrice} | pnl=$${ pnl2.toFixed(3)} — settlement_win degil`);
           continue;
         }
