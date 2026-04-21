@@ -187,50 +187,12 @@ export async function checkScalpLive(
       const sizeMatched = (buyResult as any).size_matched ?? (buyResult as any).sizeMatched ?? shares;
       console.log(`[live] BUY FILL @${entryPrice} | order=${entryOrderId.slice(0,10)}... | filled=${sizeMatched}`);
 
-      // Token bakiyesi onaylanana kadar bekle
-      let confirmedBalance = 0;
-      for (let poll = 0; poll < 12; poll++) {
-        await new Promise(r => setTimeout(r, 1000));
-        try {
-          const balRes = await client.getBalanceAllowance({
-            asset_type: AssetType.CONDITIONAL,
-            token_id: tokenId,
-          });
-          const raw = Math.floor((parseFloat(balRes.balance) / 1e6) * 100) / 100;
-          if (raw >= 1) {
-            confirmedBalance = raw;
-            console.log(`[live] Token onaylandi: ${confirmedBalance} shares (${poll + 1}s)`);
-            break;
-          }
-        } catch { /* polling gecici hata */ }
-      }
-      if (confirmedBalance < 1) {
-        console.warn('[live] Token bakiye 12s icinde onaylanmadi — GTC atlandi, FOK cascade fallback');
-        confirmedBalance = 0;
-      }
-
-      // GTC STOP @ stop_price
-      let stopOrderId: string | null = null;
-      if (confirmedBalance >= 5) {
-        try {
-          const stopOrder = await client.createOrder(
-            { tokenID: tokenId, price: stopPrice, side: Side.SELL, size: confirmedBalance, feeRateBps: GTC_FEE_BPS },
-            { tickSize: TICK_SIZE, negRisk: false },
-          );
-          const stopResult = await client.postOrder(stopOrder, OrderType.GTC);
-          const stopErr = (stopResult as any).error ?? (stopResult as any).errorMsg;
-          if (!stopErr) {
-            stopOrderId = (stopResult as any).orderID ?? null;
-            console.log(`[live] GTC STOP @${stopPrice} set | size=${confirmedBalance} | order=${stopOrderId?.slice(0,10)}...`);
-          } else {
-            console.warn(`[live] GTC STOP kurulamadi: ${stopErr} — FOK cascade fallback aktif`);
-          }
-        } catch(e: any) {
-          console.warn(`[live] GTC STOP hatasi: ${e.message}`);
-        }
-      }
-
-      insertLiveTrade(db, market, side, tokenId, entryOrderId, null, stopOrderId, shares, entryPrice, stopPrice);
+      // NOT: GTC stop emri kullanilmiyor — Polymarket CLOB'da GTC limit SELL
+      // orderbook'taki mevcut alicilarla aninda eslesiyor (price improvement).
+      // Stop korumasi icin updateScalpLive() her tick'te mid fiyatini izler,
+      // stop seviyesine dusunce FOK cascade ile cikar.
+      console.log();
+      insertLiveTrade(db, market, side, tokenId, entryOrderId, null, null, shares, entryPrice, stopPrice);
       break;
 
     } catch(e: any) {
