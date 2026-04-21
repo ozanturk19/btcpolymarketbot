@@ -43,7 +43,7 @@ const STOP_DIST  = 0.06;
 
 // 5-dk market parametreleri
 const ENTRY_MIN_5    = 0.91;
-const ENTRY_MAX_5    = 0.93;
+const ENTRY_MAX_5    = 0.92;  // 0.92-0.93 bandi negatif PnL: 87 trade, -$10.96 (analiz 2026-04)
 const ELAPSED_MIN_5  = 90;
 const ELAPSED_MAX_5  = 240;
 const REMAINING_MIN_5 = 60;
@@ -58,6 +58,8 @@ const REMAINING_MIN_15 = 120;
 // Circuit breaker: kapanmaya yakin ve fiyat belirsizse garantili cikis
 const CIRCUIT_BREAKER_REMAINING  = 30;   // saniye kaldiysa tetikle
 const CIRCUIT_BREAKER_THRESHOLD  = 0.87; // mid bu esik altinda + remaining<=30s -> acil sat (0.87 = stop seviyesi alti, gercek crash korumasi)
+// Derin crash: mid bu seviyenin altina duserse remaining/holdTime'dan bagimsiz aninda cikis
+const DEEP_CRASH_THRESHOLD = 0.80;
 
 // Fake stop engelleme: giris sonrasi bu kadar saniye gecmeden stop tetiklenemez.
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye
@@ -125,17 +127,17 @@ export async function checkScalpLive(
   downAsk: number | null,
   elapsed: number,
 ): Promise<void> {
-  if (market.durationMin !== 5 && market.durationMin !== 15) return;
+  if (market.durationMin !== 5) return;  // sadece 5dk — 15dk gecici devre disi
 
   const now       = Math.floor(Date.now() / 1000);
   const remaining = market.closeTime - now;
 
   // Duration-aware entry filtreleri
-  const entryMin     = market.durationMin === 15 ? ENTRY_MIN_15  : ENTRY_MIN_5;
-  const entryMax     = market.durationMin === 15 ? ENTRY_MAX_15  : ENTRY_MAX_5;
-  const elapsedMin   = market.durationMin === 15 ? ELAPSED_MIN_15 : ELAPSED_MIN_5;
-  const elapsedMax   = market.durationMin === 15 ? ELAPSED_MAX_15 : ELAPSED_MAX_5;
-  const remainingMin = market.durationMin === 15 ? REMAINING_MIN_15 : REMAINING_MIN_5;
+  const entryMin     = ENTRY_MIN_5;
+  const entryMax     = ENTRY_MAX_5;
+  const elapsedMin   = ELAPSED_MIN_5;
+  const elapsedMax   = ELAPSED_MAX_5;
+  const remainingMin = REMAINING_MIN_5;
 
   if (elapsed < elapsedMin || elapsed > elapsedMax || remaining < remainingMin) return;
 
@@ -281,13 +283,17 @@ export async function updateScalpLive(
     const remaining = market.closeTime - now;
 
     // -- Exit tetikleyici karar --
-    let exitTrigger: 'stop' | 'circuit_breaker' | 'force' | null = null;
+    let exitTrigger: 'stop' | 'circuit_breaker' | 'force' | 'deep_crash' | null = null;
 
     if (force) {
       exitTrigger = 'force';
     } else if (mid <= t.stop_price) {
       // Normal stop -- min hold ve crash bypass
-      if (holdTime < MIN_HOLD_BEFORE_STOP) {
+      if (!t.stop_order_id) {
+        // GTC stop kurulamamisti — min hold bekleme, direkt exit
+        exitTrigger = 'stop';
+        console.log(`[live] STOP (no-GTC) T${t.id} mid=${mid} <= stop=${t.stop_price} | hold=${holdTime}s`);
+      } else if (holdTime < MIN_HOLD_BEFORE_STOP) {
         const crashDiff = t.stop_price - mid;
         if (crashDiff > CRASH_BYPASS_DIST) {
           console.log(
@@ -320,11 +326,20 @@ export async function updateScalpLive(
         ` | mid=${mid} < ${CIRCUIT_BREAKER_THRESHOLD}` +
         ` | stop=${t.stop_price} (stop tetiklenmemisti)`,
       );
+    } else if (mid < DEEP_CRASH_THRESHOLD) {
+      // DERIN CRASH: remaining/holdTime bagimsiz aninda cikis
+      // T10042 tipi: mid 0.03'e duser, cascade bile yetersiz kalinabilir
+      exitTrigger = 'deep_crash';
+      console.log(
+        `[live] DEEP CRASH T${t.id} ${t.side}` +
+        ` | mid=${mid} < ${DEEP_CRASH_THRESHOLD}` +
+        ` | remaining=${remaining}s | hold=${holdTime}s`,
+      );
     }
 
     if (exitTrigger === null) continue;
 
-        const exitLabel = force ? 'FORCE/POST-CLOSE' : exitTrigger === 'circuit_breaker' ? 'CIRCUIT-BREAKER' : 'STOP';
+        const exitLabel = force ? 'FORCE/POST-CLOSE' : exitTrigger === 'circuit_breaker' ? 'CIRCUIT-BREAKER' : exitTrigger === 'deep_crash' ? 'DEEP-CRASH' : 'STOP';
     console.log(
       `[live] EXIT ${exitLabel} ${t.side}` +
       ` | mid=${mid} | stop=${t.stop_price} | hold=${holdTime}s | remaining=${remaining}s`,
@@ -441,6 +456,7 @@ export async function updateScalpLive(
 
       const exitReasonBase = force ? 'post_close_fok'
         : exitTrigger === 'circuit_breaker' ? 'circuit_breaker_fok'
+        : exitTrigger === 'deep_crash' ? 'deep_crash_fok'
         : 'stop_fok';
       const exitReason = `${exitReasonBase}_${attemptIndex + 1}`;
       const pnl = filledPrice * stopSellSize - t.entry_price * t.shares;
