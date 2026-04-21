@@ -342,14 +342,14 @@ export async function updateScalpLive(
       } else {
         exitTrigger = 'stop';
       }
-    } else if (remaining > 0 && remaining <= cbRemaining && mid < CIRCUIT_BREAKER_THRESHOLD) {
+    } else if (remaining > 0 && remaining <= cbRemaining && (mid == null || mid < CIRCUIT_BREAKER_THRESHOLD)) {
       // CIRCUIT BREAKER: sure azaldi, fiyat belirsiz -- settlement riskini kapat
       // Senaryo: mid 0.87-0.95, stop tetiklenmemis, market LOSS resolve edebilir
       exitTrigger = 'circuit_breaker';
       console.log(
         `[live] CIRCUIT BREAKER T${t.id} ${t.side}` +
         ` | remaining=${remaining}s <= ${cbRemaining}s` +
-        ` | mid=${mid} < ${CIRCUIT_BREAKER_THRESHOLD}` +
+        ` | mid=${mid ?? "undefined"} <= ${CIRCUIT_BREAKER_THRESHOLD} (null-safe)` +
         ` | stop=${t.stop_price} (stop tetiklenmemisti)`,
       );
     }
