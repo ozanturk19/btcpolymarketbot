@@ -39,7 +39,7 @@ import { Side, OrderType, AssetType } from '@polymarket/clob-client';
 
 const SIZE_USD   = 5;     // ~$4.60 per trade — CLOB min order = 5 shares
 // TARGET kaldirildi — settlement 1.00 oder, ayrica SELL limit gerekmez
-const STOP_PRICE_ABS = 0.75;  // mutlak stop seviyesi — 0.91-0.92 entry icin ~0.16-0.17 risk
+const STOP_PRICE_ABS = 0.82;  // mutlak stop seviyesi — 0.91-0.92 entry icin ~0.09-0.10 risk
 
 // 5-dk market parametreleri
 const ENTRY_MIN_5    = 0.91;
@@ -57,9 +57,9 @@ const REMAINING_MIN_15 = 120;
 
 // Circuit breaker: kapanmaya yakin ve fiyat belirsizse garantili cikis
 const CIRCUIT_BREAKER_REMAINING  = 30;   // saniye kaldiysa tetikle
-const CIRCUIT_BREAKER_THRESHOLD  = 0.87; // mid bu esik altinda + remaining<=30s -> acil sat (0.87 = stop seviyesi alti, gercek crash korumasi)
+const CIRCUIT_BREAKER_THRESHOLD  = 0.80; // mid bu esik altinda + remaining<=30s -> acil sat (0.87 = stop seviyesi alti, gercek crash korumasi)
 // Derin crash: mid bu seviyenin altina duserse remaining/holdTime'dan bagimsiz aninda cikis
-const DEEP_CRASH_THRESHOLD = 0.70;  // stop 0.75 altinda, double-exit onle
+const DEEP_CRASH_THRESHOLD = 0.76;  // stop 0.82 altinda, double-exit onle
 
 // Fake stop engelleme: giris sonrasi bu kadar saniye gecmeden stop tetiklenemez.
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye

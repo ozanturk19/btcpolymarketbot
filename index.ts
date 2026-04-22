@@ -296,7 +296,7 @@ async function main(): Promise<void> {
 
   await refreshMarkets();
   setInterval(refreshMarkets, 60_000);
-  setInterval(() => tick(db, btcFeed, activeMarkets).catch(console.error), 10_000);
+  setInterval(() => tick(db, btcFeed, activeMarkets).catch(console.error), 3_000);
   setInterval(() => printQuickStats(db), 3_600_000);
 
   console.log('Bot calisiyor. Ctrl+C ile dur.\n');
