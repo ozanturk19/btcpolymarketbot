@@ -116,7 +116,7 @@ async function tick(
         }
       } else if (
         market.durationMin === 5 &&
-        elapsed >= 90 && elapsed <= 240 &&
+        elapsed >= 90 && elapsed <= 250 &&
         remaining >= 50
       ) {
         // HIZLI GIRIS TARAMASI — her 3s book cek, snapshot beklemeden entry kontrol

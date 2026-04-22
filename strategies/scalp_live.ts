@@ -62,7 +62,7 @@ const CIRCUIT_BREAKER_THRESHOLD  = 0.80; // mid bu esik altinda + remaining<=30s
 const DEEP_CRASH_THRESHOLD = 0.76;  // stop 0.82 altinda, double-exit onle
 
 // Fake stop engelleme: giris sonrasi bu kadar saniye gecmeden stop tetiklenemez.
-const MIN_HOLD_BEFORE_STOP = 60;  // saniye
+const MIN_HOLD_BEFORE_STOP = 30;  // saniye (60dan dusuruldu: orta kayiplar icin daha erken cikis)
 // stop_price'dan bu kadar asagi duserse MIN_HOLD bypass edilir (gercek crash)
 const CRASH_BYPASS_DIST = 0.12;
 
@@ -247,9 +247,16 @@ export async function updateScalpLive(
     // -- Exit tetikleyici karar --
     let exitTrigger: 'stop' | 'circuit_breaker' | 'force' | 'deep_crash' | null = null;
 
+    // Dinamik stop: kalan sureye gore genislet.
+    // 60s+ kaldiysa piyasa oynakligi normal — 0.92 entry'den 0.25pt dip sonra
+    // toparlanma (T10246 tipi whipsaw) cok yaygın. Genis stop ile bunu tolere et.
+    // Son 60s'de: yön netlesmeli, normal 0.82 stop devreye girer.
+    const effectiveStop      = remaining > 30 ? 0.62 : t.stop_price;
+    const effectiveDeepCrash = remaining > 60 ? 0.55 : DEEP_CRASH_THRESHOLD;
+
     if (force) {
       exitTrigger = 'force';
-    } else if (mid <= t.stop_price) {
+    } else if (mid <= effectiveStop) {
       // Normal stop -- min hold ve crash bypass
       // NOT: GTC kaldirildi, stop_order_id artik her zaman null.
       // Eski no-GTC bypass kaldirildi: MIN_HOLD tum tradlere uygulanir.
@@ -264,14 +271,24 @@ export async function updateScalpLive(
         } else if (remaining >= CIRCUIT_BREAKER_REMAINING) {
           console.log(
             `[live] STOP ERKEN hold=${holdTime}s < ${MIN_HOLD_BEFORE_STOP}s` +
-            ` | remaining=${remaining}s | diff=${crashDiff.toFixed(3)} -- bekleniyor`,
+            ` | remaining=${remaining}s | effectiveStop=${effectiveStop} | diff=${crashDiff.toFixed(3)} -- bekleniyor`,
           );
           // exitTrigger null kalir, asagida continue tetiklenir
         } else {
-          console.log(
-            `[live] STOP ERKEN ama remaining=${remaining}s < ${CIRCUIT_BREAKER_REMAINING}s -- acil cikis`,
-          );
-          exitTrigger = 'stop';
+          // Son 30s acil cikis — ama mid hala makul ise settlement'a birak.
+          // T10245 tipi: remaining=26s, mid=0.765 iken stop atti, market DOWN resolve etti.
+          // 0.68 altina dustuysa gercekten kotu, settlement bekleme.
+          if (mid < 0.68) {
+            console.log(
+              `[live] STOP ERKEN -- acil cikis (remaining=${remaining}s, mid=${mid} < 0.68)`,
+            );
+            exitTrigger = 'stop';
+          } else {
+            console.log(
+              `[live] STOP ERKEN -- settlement bekleniyor (remaining=${remaining}s, mid=${mid} >= 0.68)`,
+            );
+            // exitTrigger null — settlement'a birak
+          }
         }
       } else {
         exitTrigger = 'stop';
@@ -286,13 +303,14 @@ export async function updateScalpLive(
         ` | mid=${mid} < ${CIRCUIT_BREAKER_THRESHOLD}` +
         ` | stop=${t.stop_price} (stop tetiklenmemisti)`,
       );
-    } else if (mid < DEEP_CRASH_THRESHOLD) {
+    } else if (mid < effectiveDeepCrash) {
       // DERIN CRASH: remaining/holdTime bagimsiz aninda cikis
       // T10042 tipi: mid 0.03'e duser, cascade bile yetersiz kalinabilir
+      // remaining > 60s icin 0.55, son 60s icin 0.76 (deepCrash degismedi)
       exitTrigger = 'deep_crash';
       console.log(
         `[live] DEEP CRASH T${t.id} ${t.side}` +
-        ` | mid=${mid} < ${DEEP_CRASH_THRESHOLD}` +
+        ` | mid=${mid} < effectiveDeepCrash=${effectiveDeepCrash}` +
         ` | remaining=${remaining}s | hold=${holdTime}s`,
       );
     }
@@ -341,7 +359,16 @@ export async function updateScalpLive(
       }
 
       // Kademeli FOK cascade
-      const stopAttempts = [
+      // mid < 0.50: piyasa bize karsi guclu hareket ediyor (T10242 tipi crash).
+      // Normal cascade mid-0.01'den baslayinca bid coktan asagiya kaymis oluyor.
+      // Agresif mod: mid-0.04'ten basla, daha hizli bid bul.
+      const isLowMid = mid < 0.50;
+      const stopAttempts = isLowMid ? [
+        roundTick(Math.max(mid - 0.04, 0.02)),   // agresif baslangic
+        roundTick(Math.max(mid - 0.08, 0.02)),
+        roundTick(Math.max(mid - 0.13, 0.02)),
+        roundTick(Math.max(mid - 0.20, 0.02)),   // son care
+      ] : [
         roundTick(Math.max(mid - 0.01, 0.02)),
         roundTick(Math.max(mid - 0.03, 0.02)),
         roundTick(Math.max(mid - 0.06, 0.02)),
