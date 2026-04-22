@@ -117,7 +117,7 @@ async function tick(
       } else if (
         market.durationMin === 5 &&
         elapsed >= 90 && elapsed <= 240 &&
-        remaining >= 60
+        remaining >= 50
       ) {
         // HIZLI GIRIS TARAMASI — her 3s book cek, snapshot beklemeden entry kontrol
         // Cozulen problem: checkScalpLive sadece shouldSnapshot icinde calisiyor (~30-60s).
@@ -320,7 +320,7 @@ async function main(): Promise<void> {
   }
 
   await refreshMarkets();
-  setInterval(refreshMarkets, 60_000);
+  setInterval(refreshMarkets, 20_000);
   setInterval(() => tick(db, btcFeed, activeMarkets).catch(console.error), 3_000);
   setInterval(() => printQuickStats(db), 3_600_000);
 

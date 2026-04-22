@@ -45,8 +45,8 @@ const STOP_PRICE_ABS = 0.82;  // mutlak stop seviyesi — 0.91-0.92 entry icin ~
 const ENTRY_MIN_5    = 0.91;
 const ENTRY_MAX_5    = 0.92;  // 0.92-0.93 bandi negatif PnL: 87 trade, -$10.96 (analiz 2026-04)
 const ELAPSED_MIN_5  = 90;
-const ELAPSED_MAX_5  = 240;
-const REMAINING_MIN_5 = 60;
+const ELAPSED_MAX_5  = 250;
+const REMAINING_MIN_5 = 50;
 
 // 15-dk market parametreleri (paper data: 0.90-0.93 bandi WR %76, avg +$0.333)
 const ENTRY_MIN_15    = 0.90;
