@@ -64,7 +64,7 @@ const DEEP_CRASH_THRESHOLD = 0.76;  // stop 0.82 altinda, double-exit onle
 // Fake stop engelleme: giris sonrasi bu kadar saniye gecmeden stop tetiklenemez.
 const MIN_HOLD_BEFORE_STOP = 60;  // saniye
 // stop_price'dan bu kadar asagi duserse MIN_HOLD bypass edilir (gercek crash)
-const CRASH_BYPASS_DIST = 0.07;
+const CRASH_BYPASS_DIST = 0.12;
 
 // CLOB order parametreleri
 const TICK_SIZE   = '0.01';
@@ -251,11 +251,9 @@ export async function updateScalpLive(
       exitTrigger = 'force';
     } else if (mid <= t.stop_price) {
       // Normal stop -- min hold ve crash bypass
-      if (!t.stop_order_id) {
-        // GTC stop kurulamamisti — min hold bekleme, direkt exit
-        exitTrigger = 'stop';
-        console.log(`[live] STOP (no-GTC) T${t.id} mid=${mid} <= stop=${t.stop_price} | hold=${holdTime}s`);
-      } else if (holdTime < MIN_HOLD_BEFORE_STOP) {
+      // NOT: GTC kaldirildi, stop_order_id artik her zaman null.
+      // Eski no-GTC bypass kaldirildi: MIN_HOLD tum tradlere uygulanir.
+      if (holdTime < MIN_HOLD_BEFORE_STOP) {
         const crashDiff = t.stop_price - mid;
         if (crashDiff > CRASH_BYPASS_DIST) {
           console.log(
