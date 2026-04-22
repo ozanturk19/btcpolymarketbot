@@ -114,6 +114,31 @@ async function tick(
             console.log(`[last30s] T${capturedOpen.id} yogun izleme bitti`);
           })();
         }
+      } else if (
+        market.durationMin === 5 &&
+        elapsed >= 90 && elapsed <= 240 &&
+        remaining >= 60
+      ) {
+        // HIZLI GIRIS TARAMASI — her 3s book cek, snapshot beklemeden entry kontrol
+        // Cozulen problem: checkScalpLive sadece shouldSnapshot icinde calisiyor (~30-60s).
+        // 30s bos pencerede fiyat 0.91-0.92 bandina girip cikabiliyor, bot kacirir.
+        try {
+          if (market.tokenUp && market.tokenDown) {
+            const [upBook, downBook] = await Promise.all([
+              fetchBook(market.tokenUp),
+              fetchBook(market.tokenDown),
+            ]);
+            const upBid = upBook?.bids?.length  ? Number(upBook.bids.at(-1)!.price)   : null;
+            const upAsk = upBook?.asks?.length  ? Number(upBook.asks.at(-1)!.price)   : null;
+            const dnBid = downBook?.bids?.length ? Number(downBook.bids.at(-1)!.price) : null;
+            const dnAsk = downBook?.asks?.length ? Number(downBook.asks.at(-1)!.price) : null;
+            const upMid = (upBid !== null && upAsk !== null) ? (upBid + upAsk) / 2 : null;
+            const dnMid = (dnBid !== null && dnAsk !== null) ? (dnBid + dnAsk) / 2 : null;
+            if (upAsk !== null || dnAsk !== null) {
+              await checkScalpLive(db, market, upMid, dnMid, upAsk, dnAsk, elapsed);
+            }
+          }
+        } catch { /* hizli giris taramasi hatalari session engellenmez */ }
       }
     }
 
