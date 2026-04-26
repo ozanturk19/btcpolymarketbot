@@ -58,7 +58,7 @@ const TREND_THRESHOLD = 0.3;   // mean-mode farkı bu değeri geçmezse NOTR
 const MIN_MODE_DIST   = 2;     // mode'dan en az 2°C uzak olmalı (Tier 2)
 
 const MAX_OPEN         = 20;
-const MIN_USDC_RESERVE = 5.0;
+const MIN_USDC_RESERVE = 8.0;  // YES bot  ile dengeli; aynı cüzdan paylaşımı
 
 const TRADES_FILE = path.join(__dirname, 'data', 'weather_no_trades.json');
 
@@ -109,7 +109,9 @@ function loadTrades(): Trade[] {
 
 function saveTrades(trades: Trade[]): void {
   fs.mkdirSync(path.dirname(TRADES_FILE), { recursive: true });
-  fs.writeFileSync(TRADES_FILE, JSON.stringify(trades, null, 2));
+  const tmp = TRADES_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(trades, null, 2));
+  fs.renameSync(tmp, TRADES_FILE);  // atomic: scan+check-fills race condition'a karşı
 }
 
 function fetchJson(url: string): Promise<any> {
@@ -380,6 +382,24 @@ async function cmdScan(): Promise<void> {
           console.log(`   ENS=${(ensPct*100).toFixed(1)}% | PM=${(yes*100).toFixed(1)}% | EDGE=+${(edge*100).toFixed(1)}% | NO≈${noPrice} → BUY@${buyPrice}`);
           console.log(`   ${trendLabel} mode=${ens.mode}°C thr=${thr}°C dist=${Math.abs(thr - ens.mode)}°C | liq=$${Math.round(b.liquidity ?? 0)} | shares=${SHARES}`);
 
+          // YES-NO cross-check: YES bot açıksa aynı bucket'ta çakışma engelle
+          const YES_TRADES_FILE = '/root/weather/bot/live_trades.json';
+          if (fs.existsSync(YES_TRADES_FILE)) {
+            try {
+              const yesTrades: any[] = JSON.parse(fs.readFileSync(YES_TRADES_FILE, 'utf8'));
+              const conflict = yesTrades.some((yt: any) =>
+                yt.station === station &&
+                yt.date    === date &&
+                yt.top_pick === thr &&
+                ['pending_fill','filled','sell_pending'].includes(yt.status)
+              );
+              if (conflict) {
+                console.log(`   ⚠️  YES-NO çakışma: ${station.toUpperCase()} ${date} ${thr}°C YES bot açık → atlanıyor`);
+                continue;
+              }
+            } catch { /* YES bot trades okunamazsa geç */ }
+          }
+
           // Emir ver
           const order = await client.createOrder(
             { tokenID: noTokenId, price: buyPrice, side: Side.BUY, size: SHARES, feeRateBps: FEE_BPS },
@@ -452,7 +472,17 @@ async function cmdCheckFills(): Promise<void> {
   for (const t of pending) {
     try {
       const resp = await (client as any).getOrder(t.order_id) as any;
-      const status  = (resp?.status ?? '').toUpperCase();
+
+      // CLOB null / boş yanıt = order sessizce silindi (negRisk bakiye lock sorunu)
+      if (!resp || !resp.status) {
+        t.status = 'cancelled';
+        t.notes  = ((t.notes ?? '') + ' | clob-null-cancel').trim();
+        console.log(`  🚫 CLOB-NULL  ${t.station.toUpperCase()} | ${t.bucket} → cancelled`);
+        updated++;
+        continue;
+      }
+
+      const status  = (resp.status).toUpperCase();
       const matched = parseFloat(resp?.size_matched ?? '0');
       const size    = parseFloat(resp?.original_size ?? String(t.shares));
 
@@ -615,12 +645,13 @@ async function cmdCancelStale(): Promise<void> {
   const client = await getClobClient();
   const trades  = loadTrades();
   const pending = trades.filter(t => t.status === 'pending_fill');
-  const STALE_HOURS = 4;
 
   let cancelled = 0;
   for (const t of pending) {
     const age = (Date.now() - new Date(t.created_at).getTime()) / 3600000;
-    if (age < STALE_HOURS) continue;
+    // T2-near maker emirleri (-1 tick) gece fill için 6 saat bekler; T1 4h yeterli
+    const staleHours = (t.notes ?? '').includes('T2-near') ? 6 : 4;
+    if (age < staleHours) continue;
 
     try {
       await (client as any).cancelOrder({ orderID: t.order_id });
