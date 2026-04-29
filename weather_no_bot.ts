@@ -14,7 +14,7 @@
  * Bağımsız çalışır — /root/weather/ botuna dokunmaz.
  */
 
-import { Side, OrderType } from '@polymarket/clob-client';
+import { Side, OrderType } from '@polymarket/clob-client-v2';
 import { getClobClient }   from './live/client';
 import * as fs   from 'fs';
 import * as path from 'path';
@@ -22,7 +22,7 @@ import * as https from 'https';
 import * as http  from 'http';
 
 // ── Parametreler ────────────────────────────────────────────────────────────
-const BUY_SHARES         = 7;           // BUY emri: 7 sipariş → ~6.99 token gelir (negRisk 0.001/share kaybı; 6→5.994 sınıra yakın, 7→6.993 güvenli buffer)
+const BUY_SHARES         = 6;   // Geçici: bakiye düşük, 7e dön bakiye>10 olunca           // BUY emri: 7 sipariş → ~6.99 token gelir (negRisk 0.001/share kaybı; 6→5.994 sınıra yakın, 7→6.993 güvenli buffer)
 const MIN_SELL_SHARES    = 5;           // CLOB minimum sell size
 const SHARES             = BUY_SHARES;  // alias — scan loop içinde kullanılır
 const AUTO_SELL_PRICE    = 0.99;        // hedef çıkış fiyatı (0.997'den düşürüldü — fill kolaylığı)
@@ -39,7 +39,8 @@ const GAMMA_API          = 'https://gamma-api.polymarket.com';
 //   Mantık: model hiç üye koymuyor → settlement ihtimali neredeyse sıfır
 //   PM fiyatı %1.5+ ise küçük mispricing yeterli → 0.98 al, 0.99 sat
 const YES_MIN_CAPPED  = 0.015;  // PM en az %1.5 (gerçek likit, 0.985'ten NO alınır)
-const YES_MAX_CAPPED  = 0.40;   // PM en fazla %40 (consensus değil ama likit)
+const YES_MAX_CAPPED  = 0.40;   // T2 için PM max (T1 için YES_MAX_T1 geçerli)
+const YES_MAX_T1      = 0.20;   // T1: market %20'den fazla YES fiyatlarsa model çok yanılıyor
 
 // TIER 2 — NEAR-MISS: 1-3 üye (ENS=%3-7%), trend + mesafe filtresi ZORUNLU
 //   Mantık: birkaç ensemble üyesi bu bucket'ı gösteriyor → yön analizi gerekli
@@ -58,7 +59,7 @@ const TREND_THRESHOLD = 0.3;   // mean-mode farkı bu değeri geçmezse NOTR
 const MIN_MODE_DIST   = 2;     // mode'dan en az 2°C uzak olmalı (Tier 2)
 
 const MAX_OPEN         = 20;
-const MIN_USDC_RESERVE = 8.0;  // YES bot  ile dengeli; aynı cüzdan paylaşımı
+const MIN_USDC_RESERVE = 5.0;  // Geçici indirim — settled tokens bekleniyor  // YES bot  ile dengeli; aynı cüzdan paylaşımı
 
 const TRADES_FILE = path.join(__dirname, 'data', 'weather_no_trades.json');
 
@@ -162,14 +163,18 @@ function shortId(): string {
 // Server-side endpoint: bias correction + CAP_LO dashboard ile %100 aynı.
 // Bot ASLA kendi bias hesaplamaz — her zaman bu endpoint'i kullanır.
 interface EnsStats {
-  bucketProbs: Map<number, number>;   // threshold → ENS% (bias-corrected, capped)
-  cappedSet:   Set<number>;           // threshold → capped=true olanlar (0 üye, ENS=3%)
-  mode:        number;                 // en olası settlement °C (bias-corrected)
-  modePct:     number;                 // mode'un ENS%'i
-  mean:        number;                 // bias-corrected ensemble mean
-  trend:       'warming' | 'cooling' | 'neutral';
-  memberCount: number;
-  bias:        number;                 // uygulanan bias (negatif = model soğuk)
+  bucketProbs:    Map<number, number>;
+  cappedSet:      Set<number>;
+  mode:           number;
+  modePct:        number;
+  mean:           number;
+  trend:          'warming' | 'cooling' | 'neutral';
+  memberCount:    number;
+  bias:           number;
+  recentActuals:  Array<{date: string; actual: number}>;  // son 3 gün gerçek değer
+  coldStreak:     number;                                  // model kaç gün alttan vurdu
+  warmStreak:     number;
+  streakDelta:    number;                                  // streak'teki ort. sapma °C
 }
 
 async function getEnsStats(
@@ -199,12 +204,16 @@ async function getEnsStats(
     return {
       bucketProbs,
       cappedSet,
-      mode:        data.corrected_mode  as number,
-      modePct:     data.mode_pct        as number,
-      mean:        data.corrected_mean  as number,
+      mode:           data.corrected_mode  as number,
+      modePct:        data.mode_pct        as number,
+      mean:           data.corrected_mean  as number,
       trend,
-      memberCount: data.member_count    as number,
-      bias:        data.bias            as number,
+      memberCount:    data.member_count    as number,
+      bias:           data.bias            as number,
+      recentActuals:  (data.recent_actuals as any[] ?? []),
+      coldStreak:     (data.cold_streak    as number) ?? 0,
+      warmStreak:     (data.warm_streak    as number) ?? 0,
+      streakDelta:    (data.streak_delta   as number) ?? 0.0,
     };
   } catch { return null; }
 }
@@ -251,6 +260,19 @@ async function getEventNoTokenMap(slug: string): Promise<Map<string, string>> {
 
 // ── SCAN: Fırsat tara, BUY NO aç ───────────────────────────────────────────
 async function cmdScan(): Promise<void> {
+  // Polymarket exchange upgrade 2026-04-28: trading paused ~10:30-12:30 UTC
+  // Tüm açık emirler silinecek — bu pencerede scan yapmayalım
+  {
+    const _now = new Date();
+    const _d   = _now.toISOString().slice(0,10);
+    const _h   = _now.getUTCHours();
+    const _m   = _now.getUTCMinutes();
+    if (_d === '2026-04-28' && (_h === 10 || _h === 11 || (_h === 12 && _m < 30))) {
+      console.log('⏸  POLYMARKET UPGRADE BAKIMI (2026-04-28 10:30-12:30 UTC) — scan atlandı');
+      return;
+    }
+  }
+
   console.log('\n🔍 Weather NO Scanner başlıyor...\n');
 
   const client = await getClobClient();
@@ -323,6 +345,25 @@ async function cmdScan(): Promise<void> {
           // ── Ortak filtre: minimum likidite ─────────────────────────────────
           if ((b.liquidity ?? 0) < MIN_LIQUIDITY) continue;
 
+          // ── Filtre A: Recent Settlement Guard ──────────────────────────────
+          // Son 3 günde bu threshold'a ≤1°C yakın gerçek değer varsa atla
+          // (Piyasa bunu fiyatladığı için yüksek NO riski var)
+          const recentHit = ens.recentActuals.some(
+            ra => Math.abs(ra.actual - thr) <= 1
+          );
+          if (recentHit) {
+            const lastActual = ens.recentActuals[0]?.actual ?? '?';
+            console.log(`  ⛔ RECENT SETTLEMENT GUARD: ${thr}°C — son gerçek=${lastActual}°C (≤1°C uzak)`);
+            continue;
+          }
+
+          // ── Filtre B: Cold Streak Guard ─────────────────────────────────────
+          // Model 2+ gün alttan vuruyorsa üst bucket NO'su ekstra risk taşır
+          if (ens.coldStreak >= 2 && thr >= ens.mode) {
+            console.log(`  ⛔ COLD STREAK GUARD: ${thr}°C — model ${ens.coldStreak} gündür ${ens.streakDelta.toFixed(1)}°C alttan vuruyor, üst bucket riski`);
+            continue;
+          }
+
           let tier = '';
           if (isCapped) {
             // ────────────────────────────────────────────────────────────────
@@ -332,7 +373,14 @@ async function cmdScan(): Promise<void> {
             // ────────────────────────────────────────────────────────────────
             if (ens.trend === 'warming' && isAbove) continue;  // ISINMA'da üst extreme
             if (ens.trend === 'cooling' && isBelow) continue;  // SOGUMA'da alt extreme
-            if (yes < YES_MIN_CAPPED || yes > YES_MAX_CAPPED) continue;
+            if (yes < YES_MIN_CAPPED || yes > YES_MAX_T1) continue;  // T1: maks %20 YES
+            // T1 güvenlik: mean threshold'dan en az MIN_MODE_DIST aşağıda olmalı
+            // (EGLC 2026-04-27 dersi: mode=thr → settlement riski var, market haklıydı)
+            const t1DistC = thr - ens.mean;
+            if (t1DistC < MIN_MODE_DIST) {
+              console.log(`  ⛔ T1 SKIP: mean-thr gap=${t1DistC.toFixed(1)}°C < ${MIN_MODE_DIST}°C (${station.toUpperCase()} ${thr}°C mean=${ens.mean}°C)`);
+              continue;
+            }
             // CAPPED kabul — aşağıya devam (emir ver)
             tier = 'T1-capped';
             console.log(`     🎯 TIER1-CAPPED thr=${thr}°C | PM=${(yes*100).toFixed(1)}% ENS=cap(3%) liq=$${Math.round(b.liquidity??0)}`);
@@ -678,7 +726,7 @@ async function cmdRedeem(): Promise<void> {
 
   const NR_ADAPTER   = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
   const CTF_ADDRESS  = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
-  const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+  const USDC_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';  // pUSD (V2)
   const WCOL_ADDRESS = '0x3A3BD7bb9528E159577F7C2e685CC81A765002E2';
 
   const CTF_ABI = [
@@ -695,7 +743,7 @@ async function cmdRedeem(): Promise<void> {
   const ERC20   = ['function balanceOf(address) view returns (uint256)'];
   const WCOL_ABI = ['function balanceOf(address) view returns (uint256)', 'function unwrap(address,uint256) external'];
 
-  const RPCS = ['https://polygon-bor-rpc.publicnode.com', 'https://polygon.drpc.org'];
+  const RPCS = ['https://polygon.gateway.tenderly.co', 'https://polygon.drpc.org'];
   let provider: any = null;
   for (const rpc of RPCS) {
     try {

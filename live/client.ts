@@ -1,15 +1,14 @@
 /**
  * live/client.ts — Polymarket CLOB client singleton
  */
-import { ClobClient, AssetType } from '@polymarket/clob-client';
+import { ClobClient, AssetType, Chain, SignatureTypeV2 } from '@polymarket/clob-client-v2';
 import { Wallet }                from '@ethersproject/wallet';
 import * as dotenv               from 'dotenv';
 import * as path                 from 'path';
 
 dotenv.config({ path: '/root/.polymarket_secrets' });
 
-const HOST     = 'https://clob.polymarket.com';
-const CHAIN_ID = 137;
+const HOST  = 'https://clob.polymarket.com';
 
 let _client: ClobClient | null = null;
 let _initError: string | null  = null;
@@ -26,13 +25,20 @@ export async function initClobClient(): Promise<void> {
     const wallet = new Wallet(pk);
     console.log(`[live/client] Cüzdan: ${wallet.address}`);
 
-    // API key türet — off-chain EIP-712, GAS YOK
-    const tmp   = new ClobClient(HOST, CHAIN_ID, wallet);
+    // API key türet — off-chain EIP-712, GAS YOK (V2 client)
+    const tmp   = new ClobClient({ host: HOST, chain: Chain.POLYGON, signer: wallet });
     const creds = await tmp.createOrDeriveApiKey();
     console.log(`[live/client] ✅ API key: ${creds.key.slice(0, 8)}...`);
 
-    // Tam client: signatureType=0 (EOA), funder=kendi adresimiz
-    _client = new ClobClient(HOST, CHAIN_ID, wallet, creds, 0, wallet.address);
+    // Tam client: SignatureTypeV2.EOA (=0), funder=kendi adresimiz
+    _client = new ClobClient({
+      host:          HOST,
+      chain:         Chain.POLYGON,
+      signer:        wallet,
+      creds,
+      signatureType: SignatureTypeV2.EOA,
+      funderAddress: wallet.address,
+    });
 
     // Bağlantı testi
     const bal = await _client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
