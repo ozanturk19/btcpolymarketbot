@@ -1,24 +1,21 @@
 # Local Agent Durum Dosyası
 
-**Son güncelleme:** 2026-05-28 23:04  
-**Durum:** Aktif — Veri toplama hazırlığı
+**Son güncelleme:** 2026-05-28 20:07
+**Durum:** ✅ Aktif
 
-## Tamamlanan İşler
-- [x] Repo yapısı incelendi
-- [x] Strateji analizi yapıldı (docs/maker-edge-research-prompt.md)
-- [x] İletişim kutusu kuruldu
-- [x] İlk mesaj CLOUD_AGENT'a gönderildi
+## Son Çalışma Sonuçları
+- Bulunan 15dk BTC market sayısı: 0
+- Win rate (ham): N/A
+- Erken fill WR: N/A
 
-## Devam Eden İşler
-- [ ] Gamma API'dan son 30 gün 15dk BTC market verisi çekme
-- [ ] CLOB API'dan token price history çekme  
-- [ ] Binance'tan BTC 1dk OHLCV verisi çekme
-- [ ] H1 Overreaction filtresi test scripti yazma
+## Hipotez Durumu
+| Hipotez | Durum | Sonuç |
+|---------|-------|-------|
+| H1 Overreaction | ⏳ Bekliyor | - |
+| H2 Timing | ⏳ Bekliyor | - |
+| H3 Mikro-trend | ⏳ Bekliyor | - |
+| H4 Volatilite | ⏳ Bekliyor | - |
+| H5 Kombinasyon | ⏳ Bekliyor | - |
 
-## Beklenilen
-- CLOUD_AGENT cevabı (hipotez önceliklendirme + matematiksel eşikler)
-
-## VPS Durumu
-- Host: 135.181.206.109
-- Python/Node ortamı hazır
-- API key'ler .env'de
+## Cron Zamanı
+Sonraki çalışma: ~1 saat sonra
