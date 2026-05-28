@@ -1,0 +1,65 @@
+{
+  "last_updated": "2026-05-28T00:00:00Z",
+  "consensus_reached": false,
+  "status": "researching",
+  "current_live_strategy": {
+    "name": "streak_reversal",
+    "file": "btc_reversal_bot.ts",
+    "mode": "paper",
+    "params": {
+      "STREAK_N": 5,
+      "BUY_PRICE": 0.40,
+      "SELL_PRICE": 0.99,
+      "BUY_SHARES": 6,
+      "MAX_OPEN": 3,
+      "ENTRY_MIN_ELAPSED_MIN": 2,
+      "ENTRY_MAX_ELAPSED_MIN": 11
+    },
+    "theoretical_breakeven_wr": 0.404,
+    "simulated_wr": null,
+    "real_wr": null
+  },
+  "hypotheses_under_test": [
+    {
+      "id": 1,
+      "name": "brownian_bridge_timing",
+      "description": "Fill t < N dk filtresi — erken fill daha iyi WR?",
+      "status": "pending_local_test",
+      "result": null
+    },
+    {
+      "id": 2,
+      "name": "flash_dip_overreaction",
+      "description": "BTC küçük hareket + token büyük dip = overreaction",
+      "status": "pending_local_test",
+      "result": null
+    },
+    {
+      "id": 3,
+      "name": "t2_token_price_filter",
+      "description": "t=2dk token fiyatı > 0.46 ise sonraki fill iyi mi?",
+      "status": "pending_local_test",
+      "result": null
+    },
+    {
+      "id": 4,
+      "name": "streak_reversal_real_wr",
+      "description": "Gerçek veride N=5 streak sonrası WR nedir?",
+      "status": "pending_local_test",
+      "result": null
+    },
+    {
+      "id": 5,
+      "name": "low_volatility_window",
+      "description": "BTC sakin dönemlerde fill kalitesi daha iyi mi?",
+      "status": "pending_local_test",
+      "result": null
+    }
+  ],
+  "recommended_params_pending_validation": {
+    "FILL_DEADLINE_MIN": null,
+    "MIN_T2_PRICE": null,
+    "MAX_BTC_MOVE_BPS": null,
+    "OPTIMAL_STREAK_N": null
+  }
+}

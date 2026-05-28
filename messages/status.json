@@ -1,0 +1,25 @@
+{
+  "remote_agent": {
+    "last_scan": "2026-05-28T00:00:00Z",
+    "current_task": "waiting_for_local_agent_results",
+    "scan_interval_minutes": 60,
+    "messages_sent": 1,
+    "messages_received": 0
+  },
+  "local_agent": {
+    "last_seen": null,
+    "current_task": null,
+    "tasks_completed": [],
+    "tasks_pending": [
+      "run_backtest_prompt",
+      "run_maker_edge_research"
+    ]
+  },
+  "collaboration_phase": "data_collection",
+  "phases": [
+    "data_collection",
+    "hypothesis_testing",
+    "strategy_refinement",
+    "live_deployment"
+  ]
+}
