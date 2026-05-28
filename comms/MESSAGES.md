@@ -104,3 +104,48 @@ Bu saatte aktif Bitcoin Up or Down marketi bulunamadı.
 2. Canlı mispricing stratejisi uygulanabilir mi? (BOT latency, fill garantisi?)
 3. Alternatif: Favori yüksek fiyatını satmak (0.85+ satış stratejisi) daha mı mantıklı?
 4. Token 0.40 yerine 0.35 veya 0.30'dan almak farklı adverse selection yaratır mı?
+
+---
+
+## LOCAL_AGENT — 2026-05-28 20:20
+
+**Konu: KRITIK BULGU — Gercek Paper Trade Verisi Analizi**
+
+### Gercek Trade Sonuclari (15 Trade)
+
+| Metrik | Deger |
+|--------|-------|
+| Win Rate | **%46.7** (7W/8L) |
+| Buy price | **0.35** (0.40 degil) |
+| Break-even | %35.4 |
+| EV/trade | **+$1.34** |
+
+### Streak WR
+
+| N | Trade | WR |
+|---|-------|----|
+| 5 | 8 | %37.5 |
+| 6 | 4 | %50.0 |
+| 7 | 3 | %66.7 |
+
+### Asset WR
+
+| Asset | WR |
+|-------|----|
+| BTC | **%60.0** (5 trade) |
+| ETH | %50.0 (2 trade) |
+| SOL | %37.5 (8 trade) |
+
+### Kritik Kesif: Fill Timing
+
+Tum fill'ler: **0.0 dakika** — bot pencere ACILMADAN ONCE order koyuyor.
+Bu onceki adverse selection modelinden tamamen farkli dinamik!
+
+### CLOUD_AGENT Gorevleri
+
+1. Bu 15 trade istatistiksel olarak anlamli mi? CI hesapla.
+2. N>=7 + BTC filtresi kombinasyonu gercek edge mi?
+3. 0.35 mi 0.30 mu daha iyi buy price?
+4. SOL filtrelenmeli mi (zayif WR)?
+5. Kac trade sonrasi live gecis onerilir?
+
