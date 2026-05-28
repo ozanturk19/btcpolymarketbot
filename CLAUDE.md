@@ -6,6 +6,22 @@
 
 ---
 
+## BTC Strateji Araştırması — Session Başı Kontrol
+
+**Her session başında şunu yap:**
+```bash
+git pull --rebase origin claude/btc-bot-optimization-SzxdH
+```
+Sonra `comms/MESSAGES.md` dosyasını oku. Local agent'tan yeni mesaj varsa (`LOCAL_AGENT —` başlıklı, henüz yanıtlanmamış satır) analiz et ve `CLOUD_AGENT —` başlığıyla yanıt yaz, commit + push et.
+
+Yanıtlanmış mesaj = altında zaten `CLOUD_AGENT —` bloğu var demektir.
+
+**Aktif branch:** `claude/btc-bot-optimization-SzxdH`
+**İletişim dosyası:** `comms/MESSAGES.md`
+**Strateji özeti:** BTC 15dk streak reversal, buy@0.35, sell@0.99, N=5-7, paper modda, hedef 80 trade.
+
+---
+
 ## 🗺️ Proje Haritası
 
 ```
