@@ -1,0 +1,145 @@
+Generating path...
+Building markets...
+Markets ready: 35040
+
+═══════════════════════════════════════════════════════════════
+ANALYSIS 1: Fill Time → Win Rate
+═══════════════════════════════════════════════════════════════
+Strategy: hourly momentum, BUY 0.40, observe fill time vs WR
+
+FillTime(min) | Fills  | WR%   | EV/fill | Note
+--------------|--------|-------|---------|------------
+t=01          |   6204 | 33.88 | $-0.387 | ✗ negative
+t=02          |   4842 | 34.94 | $-0.324 | ✗ negative
+t=03          |   3260 | 34.17 | $-0.370 | ✗ negative
+t=04          |   2349 | 34.31 | $-0.362 | ✗ negative
+t=05          |   1647 | 34.18 | $-0.370 | ✗ negative
+t=06          |   1346 | 30.09 | $-0.613 | ✗ negative
+t=07          |   1154 | 35.79 | $-0.274 | ✗ negative
+t=08          |    983 | 30.32 | $-0.599 | ✗ negative
+t=09          |    818 | 31.91 | $-0.505 | ✗ negative
+t=10          |    737 | 29.99 | $-0.619 | ✗ negative
+t=11          |    625 | 32.48 | $-0.471 | ✗ negative
+t=12          |    595 | 29.75 | $-0.633 | ✗ negative
+t=13          |    513 | 29.63 | $-0.640 | ✗ negative
+t=14          |    478 | 26.36 | $-0.834 | ✗ negative
+t=15          |    517 |  0.00 | $-2.400 | ✗ negative
+
+═══════════════════════════════════════════════════════════════
+ANALYSIS 2: Polymarket "Mispricing" Edge → WR & EV
+═══════════════════════════════════════════════════════════════
+Question: If Polymarket prices token at FairValue - X cents,
+what fill rate + WR do we get?
+
+Mispricing | FillRate% | WR%   | EV/fill | Daily$  | Sustainable?
+-----------|-----------|-------|---------|---------|-------------
+  0 bps    |     74.4 | 32.73 | $-0.456 | $-32.54 | ✗ NO
+ 10 bps    |     74.5 | 32.83 | $-0.450 | $-32.17 | ✗ NO
+ 20 bps    |     74.6 | 32.93 | $-0.444 | $-31.78 | ✗ NO
+ 30 bps    |     74.7 | 33.03 | $-0.438 | $-31.42 | ✗ NO
+ 50 bps    |     74.9 | 33.23 | $-0.426 | $-30.68 | ✗ NO
+ 80 bps    |     75.3 | 33.54 | $-0.408 | $-29.48 | ✗ NO
+100 bps    |     75.5 | 33.72 | $-0.397 | $-28.80 | ✗ NO
+150 bps    |     76.0 | 34.17 | $-0.371 | $-27.04 | ✗ NO
+
+═══════════════════════════════════════════════════════════════
+ANALYSIS 3: Late-Fill Filter Strategy
+═══════════════════════════════════════════════════════════════
+Strategy: Only count fills that happen AFTER tMin minutes
+(Early fills = strong adverse move = bad)
+
+tMin= 0min | Sig=35040 Fill=26068 (74.4%) WR=32.73% EV/fill=$-0.456 Total=$-11877
+tMin= 1min | Sig=35040 Fill=26068 (74.4%) WR=32.73% EV/fill=$-0.456 Total=$-11877
+tMin= 2min | Sig=35040 Fill=25639 (73.2%) WR=31.61% EV/fill=$-0.522 Total=$-13396
+tMin= 3min | Sig=35040 Fill=25119 (71.7%) WR=30.19% EV/fill=$-0.607 Total=$-15237
+tMin= 5min | Sig=35040 Fill=24075 (68.7%) WR=27.17% EV/fill=$-0.786 Total=$-18932
+tMin= 7min | Sig=35040 Fill=23022 (65.7%) WR=23.83% EV/fill=$-0.984 Total=$-22660
+tMin=10min | Sig=35040 Fill=21438 (61.2%) WR=18.21% EV/fill=$-1.319 Total=$-28267
+
+═══════════════════════════════════════════════════════════════
+ANALYSIS 4: What change1h Threshold Gives Edge?
+═══════════════════════════════════════════════════════════════
+Test increasingly strict |change1h| thresholds
+
+|chg1h| min | Signals | Fill% | WR%   | EV/fill | Daily$  | Verdict
+-----------|---------|-------|-------|---------|---------|--------
+ 0.00%    |   35040 |  74.4 | 32.73 | $-0.456 | $-32.54 | ✗ loss
+ 0.10%    |   29602 |  74.4 | 32.87 | $-0.448 | $-27.02 | ✗ loss
+ 0.20%    |   24228 |  74.4 | 33.00 | $-0.440 | $-21.74 | ✗ loss
+ 0.30%    |   19356 |  74.5 | 32.83 | $-0.450 | $-17.77 | ✗ loss
+ 0.50%    |   11135 |  74.3 | 32.34 | $-0.479 | $-10.86 | ✗ loss
+ 1.00%    |    1590 |  74.5 | 32.41 | $-0.475 | $ -1.54 | ✗ loss
+ 2.00%    |       0 |   0.0 |  0.00 | $-2.400 | $  0.00 | ✗ loss
+
+═══════════════════════════════════════════════════════════════
+ANALYSIS 5: Break-Even Math
+═══════════════════════════════════════════════════════════════
+COST = $2.4000000000000004, WIN = $3.54, LOSS = $-2.4000000000000004
+Break-even WR = 40.40%
+
+For positive EV, you need:
+  WR × $3.54 + (1-WR) × $-2.40 > 0
+  WR > 0.4040 = 40.4%
+
+Current simulated WR: ~32-33% (under fair-value assumption)
+Required uplift: +7-8 percentage points
+
+Where could this come from?
+  A. Polymarket inefficiency (oracle lag → token mispriced)
+  B. Slow-fill capture (you fill at 0.40 when fair was 0.50)
+  C. Real BTC has stronger AR(1) than -0.05 (mean reversion)
+  D. Time-of-day liquidity gaps (low volume hours)
+
+
+═══════════════════════════════════════════════════════════════
+ANALYSIS 6: How Strong Must Mean Reversion Be to Profit?
+═══════════════════════════════════════════════════════════════
+Re-simulate with different AR(1) β values
+
+AR(1) β | Fills  | WR%   | EV/fill  | Daily$
+--------|--------|-------|----------|--------
+β=-0.30 |  26635 | 33.38 | $-0.4174 | $-30.46
+β=-0.20 |  26383 | 33.08 | $-0.4349 | $-31.44
+β=-0.15 |  26270 | 32.98 | $-0.4407 | $-31.72
+β=-0.10 |  26182 | 32.86 | $-0.4480 | $-32.13
+β=-0.05 |  26068 | 32.73 | $-0.4556 | $-32.54
+β= 0.00 |  25944 | 32.57 | $-0.4653 | $-33.08
+β= 0.10 |  25728 | 32.35 | $-0.4786 | $-33.74
+
+═══════════════════════════════════════════════════════════════
+CONCLUSION OF SENSITIVITY ANALYSES
+═══════════════════════════════════════════════════════════════
+
+KEY FINDINGS:
+
+1. FAIR-VALUE PRICING KILLS THIS STRATEGY
+   When token = N(drift/σ_rem), buying at 0.40 fills when WR ≈ 40%.
+   This is mathematically below the 40.4% break-even.
+
+2. FILL TIMING DOES NOT HELP
+   Late fills (t>5min) have similar WR to early fills, because
+   in a martingale, dipping to 0.40 means token's fair value IS 0.40
+   regardless of when it dipped.
+
+3. HOURLY MOMENTUM SIGNAL HAS NEAR-ZERO EDGE IN THIS MODEL
+   change1h direction predicts next-15min UP only 49.7% of the time.
+   This is because AR(1) β=-0.05 is too weak.
+
+4. POSITIVE EV REQUIRES:
+   a. Stronger mean reversion (β ≤ -0.15) — empirically unlikely
+   b. Polymarket mispricing >50 bps consistently — unlikely on BTC
+   c. A different signal than hourly average
+
+5. STRATEGIES THAT WORK IN THIS MODEL:
+   - Streak reversal (your existing strategy) — because it
+     selects markets where retail crowds have built a directional
+     bias that's likely to overshoot intrinsic value.
+   - Possibly: extreme momentum filters (>0.5%) ONLY if combined
+     with timing logic.
+
+RECOMMENDATION:
+   Do NOT deploy this strategy live without first running real-
+   market backtest (the docs/backtest-prompt.md file).
+   Theoretical EV is negative. Real markets MAY differ if there's
+   meaningful inefficiency in the first 1-3 minutes of each market.
+

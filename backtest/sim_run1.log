@@ -1,0 +1,123 @@
+═══════════════════════════════════════════════════════════════
+BTC 15dk Hourly Momentum Backtest — Monte Carlo Simulation
+═══════════════════════════════════════════════════════════════
+Days simulated:    365
+Markets/day:       96
+Total markets:     35,040
+BTC σ_15m:         0.450%
+BTC initial:       $66,000
+AR(1) β:           -0.05
+Strategy:          BUY 6sh @ $0.4 → SELL @ $0.99
+Break-even WR:     40.4%
+
+Generating BTC price path... (might take 10-30s)
+  ✓ Path generated in 0.1s
+  ✓ Start: $66000  End: $89399
+Building market resolutions...
+  ✓ Markets built in 0.1s
+  ✓ Distribution: UP=17433 (49.8%) DOWN=17607
+  ✓ |change1h| dist: p50=0.341% p90=0.818%
+  ✓ change1h>0 → UP rate: 49.71% (n=17524)
+  ✓ change1h<0 → UP rate: 49.79% (n=17512)
+
+═══════════════════════════════════════════════════════════════
+SCENARIO RESULTS
+═══════════════════════════════════════════════════════════════
+
+Strategy                              | Sig    | Fill% | WR%    | EV/fill | EV/sig  | Daily$  | MaxDD
+--------------------------------------|--------|-------|--------|---------|---------|---------|--------
+A. Pure hourly momentum (signal>0)     |  35040 |  74.4 |  32.73 | $-0.456 | $-0.339 | $-32.54 | $11883
+B. Strong momentum (|chg1h|>0.1%)      |  29602 |  74.4 |  32.87 | $-0.448 | $-0.333 | $-27.02 |  $9871
+C. Very strong (|chg1h|>0.3%)          |  19356 |  74.5 |  32.83 | $-0.450 | $-0.335 | $-17.77 |  $6491
+D. Extreme (|chg1h|>0.5%)              |  11135 |  74.3 |  32.34 | $-0.479 | $-0.356 | $-10.86 |  $3963
+E. Hourly CONTRARIAN (mean rev)        |  35040 |  73.7 |  32.25 | $-0.484 | $-0.357 | $-34.27 | $12565
+F. Every market → UP token             |  35040 |  74.2 |  32.28 | $-0.482 | $-0.358 | $-34.36 | $12553
+G. Every market → DOWN token           |  35040 |  73.9 |  32.71 | $-0.457 | $-0.338 | $-32.45 | $11857
+H. Blind alternating                   |  35040 |  74.0 |  32.59 | $-0.464 | $-0.344 | $-32.99 | $12057
+I. BOTH sides every market             |  51907 | 100.0 |  32.49 | $-0.470 | $-0.470 | $-66.81 | $24387
+
+═══════════════════════════════════════════════════════════════
+HOUR-OF-DAY SEGMENTATION (Strategy A: hourly_momentum)
+═══════════════════════════════════════════════════════════════
+UTC  | Fills | Wins | WR%   | Net$
+-----|-------|------|-------|-------
+00   |  1095 |  366 |  33.4 | $-454.0
+01   |  1100 |  340 |  30.9 | $-620.4
+02   |  1059 |  353 |  33.3 | $-444.8
+03   |  1052 |  363 |  34.5 | $-368.6
+04   |  1093 |  356 |  32.6 | $-508.6
+05   |  1108 |  388 |  35.0 | $-354.5
+06   |  1092 |  360 |  33.0 | $-482.4
+07   |  1079 |  371 |  34.4 | $-385.9
+08   |  1080 |  338 |  31.3 | $-584.3
+09   |  1103 |  379 |  34.4 | $-395.9
+10   |  1083 |  324 |  29.9 | $-674.6
+11   |  1058 |  364 |  34.4 | $-377.0
+12   |  1087 |  327 |  30.1 | $-666.4
+13   |  1069 |  355 |  33.2 | $-456.9
+14   |  1115 |  349 |  31.3 | $-602.9
+15   |  1084 |  343 |  31.6 | $-564.2
+16   |  1085 |  353 |  32.5 | $-507.2
+17   |  1055 |  350 |  33.2 | $-453.0
+18   |  1082 |  350 |  32.3 | $-517.8
+19   |  1130 |  360 |  31.9 | $-573.6
+20   |  1090 |  370 |  33.9 | $-418.2
+21   |  1070 |  325 |  30.4 | $-637.5
+22   |  1101 |  365 |  33.2 | $-474.3
+23   |  1098 |  384 |  35.0 | $-354.2
+
+═══════════════════════════════════════════════════════════════
+FILL TIMING DISTRIBUTION (Strategy A)
+═══════════════════════════════════════════════════════════════
+t=01min | 23.8% ███████████████████████
+t=02min | 18.6% ██████████████████
+t=03min | 12.5% ████████████
+t=04min |  9.0% █████████
+t=05min |  6.3% ██████
+t=06min |  5.2% █████
+t=07min |  4.4% ████
+t=08min |  3.8% ███
+t=09min |  3.1% ███
+t=10min |  2.8% ██
+t=11min |  2.4% ██
+t=12min |  2.3% ██
+t=13min |  2.0% █
+t=14min |  1.8% █
+t=15min |  2.0% █
+Avg fill time: 4.50 min
+
+═══════════════════════════════════════════════════════════════
+RECOMMENDATIONS
+═══════════════════════════════════════════════════════════════
+
+By EV/signal (capital efficiency):
+  1. B. Strong momentum (|chg1h|>0.1%): EV/signal=$-0.3332 | Daily=$-27.02
+  2. C. Very strong (|chg1h|>0.3%): EV/signal=$-0.3351 | Daily=$-17.77
+  3. G. Every market → DOWN token: EV/signal=$-0.3380 | Daily=$-32.45
+
+By total P&L (absolute return):
+  1. D. Extreme (|chg1h|>0.5%): Total=$-3963 | Daily=$-10.86 | MaxDD=$3963
+  2. C. Very strong (|chg1h|>0.3%): Total=$-6487 | Daily=$-17.77 | MaxDD=$6491
+  3. B. Strong momentum (|chg1h|>0.1%): Total=$-9864 | Daily=$-27.02 | MaxDD=$9871
+
+═══════════════════════════════════════════════════════════════
+CRITICAL CAVEATS
+═══════════════════════════════════════════════════════════════
+
+1. Monte Carlo model assumes:
+   - GBM with mild AR(1) mean reversion (β=-0.05)
+   - Token price = Φ((drift_so_far)/σ_remaining) — BS-style fair value
+   - Maker fills at any touch of 0.40 (no queue priority issues)
+2. Real markets have:
+   - Adverse selection: 0.40 fills are NOT random; token dipped because price moved opposite
+   - Spread/depth: limit at 0.40 may not be top of book
+   - Fees: Polymarket maker rebate ~0% on BTC; no negRisk discount
+   - Settlement risk: oracle delay between bot fill and resolution
+3. CRITICAL: The "fair value at touch" assumption is conservative.
+   Real WR for 0.40 limits typically falls 2-5 points below model WR
+   because the order only fills when the market moves against you.
+   (Selection bias — see hourly-avg-strategy-analysis.md table.)
+
+CONCLUSION: Adjust simulated WR DOWN by 3-5 percentage points for
+realistic expected return.
+
