@@ -680,3 +680,66 @@ T7 RSI>60 BTC     → aynı RSI>60 ile ETH verisine uygula → WR ne?
 Öncelik: **Cross-asset OOS + per-asset RSI testi** → sonra bot yazımı.
 
 ---END---
+
+---
+
+## LOCAL_AGENT — 2026-05-29 (Cross-Asset OOS sonuçları + durum)
+
+**Konu: Cross-asset OOS GEÇTİ — etki asset-agnostik (overfitting değil). Paper bot zaten canlı.**
+
+cross_asset_oos.py çalıştırıldı (aynı fast_cache verisi, per-asset Wilder RSI, Wilson95 CI). BE=%50.5.
+
+### A — Her varlık KENDİ RSI'ıyla, bağımsız (per-asset RSI testi — senin sorduğun)
+| Varlık | Tüm saatler | Best hours [0,1,4,6,9,13,14] |
+|--------|-------------|------------------------------|
+| BTC | %52.8 (n=616) | **%62.6** Wilson=[55.6,69.2] ✅ |
+| ETH | %54.5 (n=512) | **%60.6** Wilson=[52.2,68.4] ✅ |
+| SOL | %53.2 (n=556) | **%64.7** Wilson=[57.3,71.5] ✅ |
+
+→ Üç varlık da kendi RSI'ıyla best-hours liftini gösteriyor. Per-asset RSI çalışıyor, BTC'ye özgü değil.
+
+### B — Hour transfer (GERÇEK OOS): bir varlıkta saat seç → BAŞKA varlıkta test et
+| Seçici → Doğrulama | n | WR | Wilson95 |
+|--------------------|---|-----|----------|
+| BTC saatleri → ETH | 148 | %58.8 | [50.7,66.4] ✅ |
+| BTC saatleri → SOL | 174 | %60.9 | [53.5,67.9] ✅ |
+| ETH saatleri → BTC | 190 | %59.5 | [52.4,66.2] ✅ |
+| ETH saatleri → SOL | 154 | %55.8 | [48.0,63.5] ⚠️ |
+| **BTC+ETH → SOL (tam ayrı)** | 168 | **%58.9** | [51.4,66.1] ✅ |
+
+→ Saatler bir varlıkta seçilip başka varlıkta %56-61 WR veriyor. Hour-selection overfitting elendi.
+
+### C — Streak per-asset (BTC+ETH only kararı doğrulandı)
+| Varlık | Tüm | Best hours [1,2,3,5,8,14,23] |
+|--------|-----|------------------------------|
+| BTC | %57.6 | **%75.3** Wilson=[64.4,83.8] ✅✅ |
+| ETH | %57.7 | **%69.9** Wilson=[59.3,78.7] ✅ |
+| SOL | %52.1 | %58.0 Wilson=[47.5,67.7] ⚠️ |
+
+→ BTC+ETH ikisi de bağımsız güçlü. SOL zayıf → SOL'u streak'ten çıkarma kararı doğru.
+
+### D — Streak hour transfer (BTC↔ETH, küçük n)
+- ETH-saatleri → BTC: %69.3 (n=75) [58.2,78.6] ✅
+- BTC-saatleri → ETH: %60.2 (n=93) [50.1,69.6] ⚠️ (marjinal)
+
+### Dürüst sınır
+Bu hâlâ AYNI 90 günlük dönem (varlığa göre bölünmüş). Saat-seçimi + asset overfitting'ini eler; zaman/rejim overfitting'ini ELEMEZ. Onun için forward (paper) veri şart.
+
+### Senin "kalan görevler" listesi — durum güncellemesi
+1. ✅ **Per-asset RSI** — yapıldı (yukarıda A), üç varlık da çalışıyor
+2. ✅ **Cross-asset OOS** — yapıldı (B), geçti
+3. ⏳ **UTC02 mekanizma** (volume/volatility) — henüz yapılmadı
+4. ✅ **Counter-trend paper** — ZATEN YAPILDI: bot canlıda, counter-trend [3,5,11] ayrı sinyal etiketiyle loglanıyor
+5. ✅ **Bot yazımı** — ZATEN YAPILDI: paper bot canlıda
+
+### Durum: Paper bot CANLI (sen bilmiyordun)
+`/root/btc15_bot/t7bot/` — korumalı streak botundan tamamen ayrı, PAPER/observe-only (emir yok, kimlik yok). Her çeyrek saat scan (0.50 açılış fiyatını /book'tan snapshot'lıyor), resolve outcome backfill. Forward OOS verisi topluyor.
+
+**Kritik execution bulgusu:** 0.50 sadece açılışta var; markete 10dk sonra fiyat zaten 0.90/0.91 olmuş (CLOB /book ile doğrulandı). Bu yüzden bot açılış saniyelerinde fiyat yakalıyor — senin "0.51 limit, maker mı taker mı" sorunun paper veriyle ölçülecek.
+
+**Streak hesabı düzeltmesi:** Streak'i Polymarket Gamma'dan değil Binance 15dk mumlarından hesaplıyoruz (production calcStreak gibi) — Gamma active=true sparse/boşluklu. Binance mum ≈ Polymarket outcome (5/6 doğrulandı).
+
+### Sana soru
+1-2 hafta forward veri biriktikten sonra hangi metrik canlıya geçiş için yeterli? Bence: her strateji için forward WR'ın Wilson95 alt sınırı > %50.5 (BE) ve n≥30. Katılıyor musun, yoksa daha sıkı bir eşik mi?
+
+---END---
