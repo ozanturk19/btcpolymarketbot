@@ -813,3 +813,79 @@ Canlı:     1-2 hafta → n≥25 Streak VEYA n≥40 T7 + Wilson lower > BE
 **Benden beklediğim:** Forward paper veri gelince commit et, okuyup canlı geçiş kararını birlikte verelim.
 
 ---END---
+
+---
+
+## CLOUD_AGENT — 2026-05-29 (KRİTİK: Paper bot execution testi)
+
+**Konu: "Her sinyalde 0.50'den fill olduğunu varsay" YANILTICI — gerçek fill testi şart**
+
+---
+
+### Problem
+
+Şu anki paper bot gözlemliyor: sinyal var → WR kaydediyor. Ama **gerçekten 0.50'den fill alabilir miyiz?** bunu test etmiyor.
+
+10dk sonra fiyat 0.90/0.91 olduğunu bizzat gördün. Bu demek ki **piyasa senin 0.51 limit emirini beklemeden hareket ediyor.** Eğer bot açılışta emirini 5-10 saniye geç atarsa, zaten 0.55-0.60'a gelmiş bir markete 0.51 limit koymuş olur → fill olmaz → strateji çalışmaz görünür (ya da daha kötüsü: sadece geri düşen = kaybeden marketlerde fill olur → adverse selection tekrar).
+
+---
+
+### Yapılması Gereken: Simüle Değil, Gerçek Fill Testi
+
+Paper botu şu şekilde güncelle:
+
+**1. Gerçek emir gönder, gerçek fill takip et (0 para riske atmadan):**
+```python
+# Sinyal geldiğinde:
+# 1. Gerçek 0.51 limit emir gönder (minimum size: 1 share = ~$0.51)
+# 2. 30 saniye bekle
+# 3. Fill olduysa → kaydet (fill_price, fill_latency)
+# 4. Fill olmadıysa → cancel, kaydet (no_fill)
+# 5. Fill olduysa 0.52'de hemen sat (küçük zarar/kâr, önemli değil)
+```
+
+**2. Alternatif: CLOB /book snapshot ile fill simulasyonu:**
+```python
+# Market açılışında /book'tan bid/ask al
+# Eğer ask <= 0.51 varsa → "fill olurdu" say
+# Eğer ask > 0.51 → "fill olmaz" say
+# Latency: snapshot alma zamanı - market_open_time
+```
+
+**3. En az yapılması gereken: Execution latency ölçümü**
+```python
+# Her sinyalde şunu kaydet:
+execution_log = {
+    "market_open_time": ...,
+    "signal_detected_time": ...,  # botun sinyali fark ettiği an
+    "order_would_send_time": ..., # emrin gönderildiği an (simüle)
+    "latency_ms": signal_detected - market_open,
+    "book_at_open": ask_price,    # CLOB /book'tan anlık fiyat
+    "fill_possible": ask_price <= 0.51
+}
+```
+
+---
+
+### Neden Bu Kritik
+
+Paper WR sonuçları şu an **fill varsayımına dayanıyor.** Gerçekte:
+
+- Eğer bot sinyali 30 sn geç fark ederse → fill_possible = %0
+- Eğer bot sinyali 5 sn içinde fark ederse → fill_possible = %80+
+- Eğer fill_possible = %60 ise → gerçek sinyal sayısı %60'a düşer → EV hesapları değişir
+
+**Gerçek fill rate olmadan canlıya geçiş kararı veremeyiz.**
+
+---
+
+### Öncelik
+
+Bu test diğer her şeyden önce gelir. 1 gün içinde şunu ölç:
+1. Bot sinyali market açılışından kaç saniye sonra fark ediyor?
+2. O anda /book'ta ask <= 0.51 var mı?
+3. fill_possible rate = ?
+
+Sonucu paylaş, canlı kararını ona göre verelim.
+
+---END---
