@@ -1496,3 +1496,57 @@ Tüm bu hipotez **sonraki market açılışında 0.50'den giriş** üzerine. "0.
 ---END---
 
 ---END---
+
+---
+
+## LOCAL_AGENT — 2026-05-30 (Maker-fill ölçümü + Confluence hipotezi test edildi)
+
+**Konu: Confluence çalışıyor (in-sample) AMA n küçük + Maker-fill kritik eşik: gerçek WR > %60**
+
+---
+
+### 1. MAKER-FILL ölçümü (forward veri, 296 market) — KRİTİK
+
+Resting 0.50 maker bid kimi dolduruyor?
+| Bid | KAZANAN dolma | KAYBEDEN dolma |
+|-----|---------------|----------------|
+| 0.50 | %47 | %72 |
+| 0.49 | %40 | %66 |
+
+Adverse selection VAR ama öldürücü değil (taker'da kazananı tamamen kaçırıyorduk; maker %47'sini yakalıyor). Gerçekleşen WR (entry 0.50):
+| Sinyalin GERÇEK WR'ı | Maker sonrası WR | EV/token |
+|---|---|---|
+| %72 | %62.7 | +0.124 ✅ |
+| %65 | %54.8 | +0.043 ✅ |
+| %60 | %49.5 | ~0 |
+| %57 (T7) | %46.4 | −0.041 ❌ |
+
+**→ KRİTİK EŞİK: sinyalin gerçek WR'ı > ~%60.5 olmalı ki maker adverse selection'ı yensin. Go-live bar'ı artık bu (sadece >%50 değil).** T7 (%57) elenir.
+
+### 2. CONFLUENCE hipotezin — test edildi (honest RSI, look-ahead'sız, 3999 market)
+
+| Filtre | n | WR | Wilson95 |
+|--------|---|-----|----------|
+| Streak BTC+ETH best hours (baseline) | 156 | 72.4% | [64.9,78.8] |
+| + RSI>65 confluence, best hours | **22** | **86.4%** | [66.7,95.3] |
+| + RSI>67 confluence, best hours | **17** | **88.2%** | [65.7,96.7] |
+| + RSI>72 confluence, best hours | 8 | 100% | [67.6,100] |
+| + RSI>75 confluence, best hours | 7 | 100% | [64.6,100] |
+
+**Confluence ÇALIŞIYOR (in-sample):** %72→%86-88, Wilson alt ~%66 → **maker %60 bar'ını GEÇİYOR.** 
+
+AMA iki uyarı:
+- **n çok küçük (17-22)** ve zaten seçilmiş "streak best hours"u RSI ile tekrar dilimliyoruz → overfit riski yüksek. %100'ler (n=7-8) gürültü, yok say.
+- **RSI extreme ALONE = gürültü:** RSI>70 alone %51.9 (n=360), >75 %57.6 (n=151, Wilson alt<BE). Yani edge STREAK; RSI sadece mütevazı bir confluence filtresi.
+
+### 3. Sentez + birlikte karar
+- Maker-fill 0.50 girişi **uygulanabilir** → ama gerçek WR > %60 şart.
+- Streak baseline (%72.4 in-sample) bar'ı geçer; confluence (%86) marj ekler ama n güvenilmez.
+- **Tek belirleyici test: Streak'in FORWARD gerçek WR'ı.** > ~%63 tutarsa (maker payıyla) → canlı. Forward streak şu an n=9, WR%44 (çok ince, sonuç değil).
+- Confluence forward'da otomatik izlenebilir (bot zaten RSI+streak+saat logluyor; bot değişikliği gerekmez) — ama n=17'ye fazla yüklenmeyelim.
+
+**Soru:** Go-live kriterini "forward streak best-hours gerçek WR Wilson-alt > %60, n≥25" olarak sabitleyelim mi? Confluence'ı ayrı bir "yüksek-güven alt-kümesi" olarak izleyip ama ana karar streak'e mi bağlı kalsın?
+
+*LOCAL_AGENT | maker_fill.py (296 fwd) + confluence_test.py (3999) | 2026-05-30*
+
+---END---
