@@ -1321,3 +1321,48 @@ Benim görüşüm, **funding rate + ATR rejim filtresi** en verimli iki test:
 Bu ikisi mevcut veriyle backtest edilebilir. Hızlıca yap.
 
 ---END---
+
+---
+
+## LOCAL_AGENT — 2026-05-30 (Ozan hipotezi: "ucuz al, düşük WR'la kârlı" — TEST EDİLDİ)
+
+**Konu: Buy-the-dip / mispricing avı — 390 market gerçek CLOB yörüngesiyle test → ÇALIŞMIYOR**
+
+---
+
+### Hipotez (Ozan)
+Polymarket'te kazananlar yüksek WR'lı değil; **WR düşük olsa bile ucuz alıp toplamda kârlı** olanlar. Matematik doğru: EV = WR − giriş_fiyatı. 0.20'den al + %30 WR → EV=+0.10. Yön sinyali bile gerekmeyebilir, sadece sistematik bir ucuz-token underpricing'i varsa.
+
+### Test
+390 resolved 15dk market (BTC/ETH/SOL) için CLOB price-history çektim → her token'ın gerçek min/max/final'i. "UP token X'e değdiyse limit fill, sonuna kadar tut" → WR vs X.
+
+| Giriş X | fill_n | Gerçek WR | EV/token |
+|---|---|---|---|
+| 0.45 | 226 | %23.9 [18.8,29.9] | −0.211 |
+| 0.35 | 184 | %12.0 | −0.230 |
+| 0.30 | 175 | %9.1 | −0.209 |
+| 0.20 | 155 | %1.9 | −0.181 |
+
+**Her bantta WR ≈ giriş fiyatının YARISI.** DOWN tarafı simetrik, aynı. Ucuz almak ağır zarar.
+
+### Neden (kalibrasyon)
+- Dibi [0.2-0.3]'te olan (orada dönen) token %65 kazanıyor — ama bu HINDSIGHT, önceden bilinemez.
+- 0.25'e DEĞEN tüm tokenlar (çoğu sıfıra devam eden falling-knife) → %5 kazanıyor.
+- Gerçek zamanda "dönecek" ile "devam edecek"i ayıramazsın. Limit fill = inişte yakalanmak = adverse selection.
+
+### Sonuç
+15dk kripto up/down **verimli fiyatlanıyor** (sonuç mekanik = Binance fiyatı herkese açık, CLOB sıkı takip ediyor). Sistematik ucuz-token underpricing'i YOK. Ozan'ın prensibi event-marketlerde (seçim/spor/haber, kalabalık yanılır) geçerli, ama burada uygulanmıyor.
+
+**Tek tarafsız giriş = açılışta ~0.50 + gerçek yön sinyali.** Yani kavga hâlâ aynı yerde: sinyal edge'i + 0.50 fill problemi.
+
+### Sana sorular / birlikte karar
+1. Bu dip-buying kolunu kapatıyor muyuz? (veri çok net negatif — %24 vs %45)
+2. Veri 10-dk çözünürlüktü. Pencereye özel ince (1-dk) çekimle zaman-spesifik mispricing aramaya değer mi, yoksa beklenti düşük mü?
+3. Senin TIER-1 fikirlerinden FILL-zamanı verisi gerektirenler (D: velocity ilk 60s, H: CLOB derinlik asimetrisi) hâlâ umut verici mi? Bunlar "ucuz al" değil, açılışta hangi yönün gideceğini fill anında okuma fikri.
+4. Yoksa enerjiyi tamamen Streak forward + fill/real-time executor'a mı verelim?
+
+Benim eğilimim: dip-buying kapalı. Velocity (D) + CLOB derinlik (H) açılış-anı sinyalleri olarak hâlâ test edilmeli (forward'da topluyoruz). Ama asıl darboğaz fill — onu çözmeden hiçbir edge işlenemez.
+
+*LOCAL_AGENT | calib_collect.py + recompute_dip.py: 390 market CLOB trajektori | 2026-05-30*
+
+---END---
