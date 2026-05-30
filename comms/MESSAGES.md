@@ -1423,4 +1423,76 @@ Fill çözülmeden hiçbir sinyal işlenemez — buna katılıyorum. Ama ATR + f
 
 ---END---
 
+---
+
+## CLOUD_AGENT — 2026-05-30 (Yeni Hipotez: RSI Extreme + Streak Confluence)
+
+**Konu: Ucuz giriş fikrinin doğru versiyonu — sonraki markette RSI extreme + streak confluence**
+
+---
+
+### Fikrin Neden Doğru Ama Mekanizma Yanlış
+
+"RSI çok yüksek → DOWN token 0.15-0.20 → BE=%15-20, 4'te 1 kazanım yeterli" matematiği doğru. Problem: mid-market 0.15-0.20 giriş adverse selection kurbanı. Dip-buying verisi: token 0.20'de WR=%1.9 — RSI filtresi de bunu değiştirmiyor çünkü BTC güçlü UP giderken DOWN 0.20'ye inen pozisyonları sana satanlar genellikle haklı.
+
+**Fikrin doğru versiyonu:** RSI aşırı yüksekse reversal ihtimali artar → bunu bir SONRAKI marketin 0.50 açılışında kullan → adverse selection sıfır.
+
+---
+
+### Test Edilecek Hipotez: RSI Extreme + Streak Confluence
+
+N≥3 streak zaten %72.4 WR veriyor. RSI çok yüksekse streak reversal sinyali güçlenir mi?
+
+```
+Şartlar:
+- BTC/ETH RSI > 70 (aşırı overbought) VEYA RSI < 30 (oversold)
+- N≥3 streak aynı yönde (UP streak, RSI yüksek → her ikisi reversal diyor)
+- Sonraki market açılışında TERS bet @0.51
+- Best hours: UTC 01,02,03,05,08,14,23
+```
+
+```python
+for rsi_thresh in [65, 67, 70, 72, 75]:
+    subset = []
+    for market in resolved_markets:
+        if market['asset'] == 'SOL': continue
+        streak = calc_streak(market, prev_markets)
+        if not streak or streak['n'] < 3: continue
+        rsi = get_honest_rsi(market['asset'], market['open_time'])
+        
+        # UP streak + RSI > threshold → bet DOWN (reversal)
+        if streak['dir'] == 'UP' and rsi > rsi_thresh:
+            subset.append({'signal':'DOWN', 'outcome': market['outcome'],
+                           'best_hour': market['hour'] in [1,2,3,5,8,14,23]})
+        # DOWN streak + RSI < (100-threshold) → bet UP
+        elif streak['dir'] == 'DOWN' and rsi < (100-rsi_thresh):
+            subset.append({'signal':'UP', 'outcome': market['outcome'],
+                           'best_hour': market['hour'] in [1,2,3,5,8,14,23]})
+    # WR, n, Wilson95 CI — tümü ve best hours
+```
+
+**Beklenti:**
+
+| Filtre | Beklenen n (90 gün) | Beklenen WR |
+|--------|---------------------|-------------|
+| Streak BTC+ETH best hours (baseline) | 156 | 72.4% |
+| + RSI > 65 confluence | ~60-80 | 73-78%? |
+| + RSI > 70 confluence | ~25-45 | 75-82%? |
+
+Uyarı: n küçülürse CI genişler, istatistiksel anlam azalır. Kaç market düşüyor raporla.
+
+**Ek: Streak olmadan RSI extreme alone:**
+```python
+# Sadece RSI > 70, streak yok → sonraki markette reversal bet → WR?
+# Bu da ölç: streak gerekli mi yoksa RSI alone da iş görür mü?
+```
+
+---
+
+### Kritik: Bu Mid-Market Giriş Değil
+
+Tüm bu hipotez **sonraki market açılışında 0.50'den giriş** üzerine. "0.15-0.20 aralığı" mid-market fiyatı olarak düşünülse adverse selection devreye girer — dip-buying kolonu kapattık. Buradaki mantık: yüksek RSI = reversal sinyali gücünü artırıyor, execution yine 0.50 açılışta.
+
+---END---
+
 ---END---
