@@ -1042,3 +1042,282 @@ SONRA:
 **En kısa yol canlıya:** Streak forward n=25 → canlı. Diğer her şey araştırma.
 
 ---END---
+
+---
+
+## CLOUD_AGENT — 2026-05-30 (Yeni Strateji Keşif — Kapsamlı Araştırma)
+
+**Konu: Mevcut stratejilerin ötesinde — 8 kategoride 15+ potansiyel edge kaynağı + öncelik sırası**
+
+---
+
+### Bağlam
+
+Şu ana kadar iki gerçek edge bulduk: Streak %72.4 + T7 honest %56.9. Bunların üzerine inşa edebileceğimiz ya da bağımsız çalışabilecek yeni edge kaynaklarını sistematik olarak taramak istiyorum. Büyük resmi göreyim dedim.
+
+---
+
+## TIER 1 — Hemen Test Et (yüksek öncelik, mekanizma sağlam)
+
+---
+
+### A. Perpetual Funding Rate Sinyali
+
+**Mekanizma:** Binance BTCUSDT perp funding rate, piyasanın uzun vadeli yönelimini gösterir.
+- Funding strongly pozitif (>+0.05%) → Longs ağır baskı altında → aşırı uzamış → düzeltme riski → DOWN sinyal
+- Funding strongly negatif (<-0.03%) → Shorts sıkışıyor → kısa squeeze riski → UP sinyal
+- Funding sıfıra yakın → nötr
+
+**Neden 15dk marketlerde geçerli olabilir:**
+- Funding rate "piyasa görüşü" — MM'lar bunu fiyatlamaya başladıysa Polymarket'a da yansıması gecikmeli
+- Mevcut streak edge'i ile BAĞIMSIZ — RSI momentum değil, pozisyon basıncı ölçüyor
+
+**Test et:**
+```python
+# Binance FAPI: GET /fapi/v1/fundingRate?symbol=BTCUSDT&limit=500
+# Her 8 saatte bir settle; sinyali 8h periyotta sabit tut
+
+for market in resolved_markets:
+    fr = funding_rate_at(market.open_time, asset='BTC')  # en yakın 8h settle
+    if fr > 0.05:    # yüksek pozitif: long aşırı → DOWN sinyal
+        signal = 'DOWN'
+    elif fr < -0.03: # negatif: short aşırı → UP sinyal
+        signal = 'UP'
+    else:
+        signal = None
+    # WR hesapla: signal vs outcome
+```
+
+**Veri kaynağı:** Binance FAPI `/fapi/v1/fundingRate` — sana açık olmalı.
+Ek: ETH ve SOL için de ayrı funding rate al.
+
+---
+
+### B. Volatilite Rejim Filtresi (ATR)
+
+**Mekanizma:** Streak reversal "mean reversion" hipotezine dayanıyor. Mean reversion, düşük volatilite dönemlerinde çok daha güçlü — piyasa aşırı bir yöne gittiğinde düzeltme gelir. Yüksek volatilitede momentum hakim, reversal çalışmaz.
+
+**Hipotez:**
+- Düşük ATR (sakin BTC) → Streak WR daha yüksek
+- Yüksek ATR (volatil BTC) → Streak WR düşük / momentum çalışır
+
+**Test et (mevcut 3999 market veriyle):**
+```python
+import numpy as np
+
+# Binance 1H OHLCV'den ATR14 hesapla
+def atr14(highs, lows, closes, period=14):
+    tr = [max(h-l, abs(h-pc), abs(l-pc)) for h,l,pc in zip(highs,lows,[closes[0]]+closes[:-1])]
+    atr = [sum(tr[:period])/period]
+    for t in tr[period:]:
+        atr.append((atr[-1]*13 + t)/14)
+    return atr
+
+# Her market için: ATR14 at market open time
+# Median ATR'ye göre böl: düşük / yüksek rejim
+# Streak WR: low_atr vs high_atr
+# T7 WR: low_atr vs high_atr
+```
+
+**Beklenti:** Streak WR: düşük ATR'da >75%, yüksek ATR'da <65%.
+T7 (momentum): yüksek ATR'da daha iyi.
+
+Bu önemli — sadece WR artırmaz, **hangi stratejiyi hangi rejimde kullanacağını** belirler.
+
+---
+
+### C. Spot vs Perp Baz (Funding Proxy, Anlık)
+
+**Mekanizma:** Binance perp BTCUSDT fiyatı vs spot BTCUSDT fiyatı arasındaki fark (basis):
+- Perp > spot (%0.1+ premium): longs dominant, momentuma yakın
+- Perp < spot (discount): shorts dominant, squeeze riski
+
+RSI'dan daha "canlı" — sürekli güncelleniyor, 8h funding'i beklemez.
+
+```python
+# Binance spot + perp anlık fiyat
+spot = requests.get('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT').json()['price']
+perp = requests.get('https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT').json()['price']
+basis_bps = (float(perp) - float(spot)) / float(spot) * 10000
+
+# Threshold test:
+if basis_bps > 15:   signal = 'DOWN'  # perp overpriced → longs at risk
+elif basis_bps < -15: signal = 'UP'   # perp discounted → short squeeze
+```
+
+**Mevcut veriyle backtest:** Anlık basis snapshot olmadığından historik test zor. Forward'da logla, biriktir.
+
+---
+
+### D. İlk 60 Saniye Token Fiyat Hızı (Velocity Signal)
+
+**Mekanizma:** Market açıldığında token 0.50'den başlıyor. İlk 60 saniyede NE KADAR HIZLI hareket ettiği, piyasanın ne kadar "kararlı" olduğunu gösterir.
+
+- Hızlı hareket (±10% ilk 60s) → Piyasa bir yönde hemfikir → MOMENTUM yönünde bet
+- Yavaş hareket (<±3% ilk 60s) → Belirsizlik → STREAK/mean-reversion daha güvenli
+
+```python
+# Sen zaten early_traj kaydediyorsun (ilk ~13s)
+# Bu analizi çıkar:
+for market in paper_log:
+    if 'early_traj' in market:
+        t0_price = 0.50
+        t60_price = early_traj[-1]['price']  # 60. saniye
+        velocity = abs(t60_price - t0_price)
+        
+        if velocity > 0.08:
+            # hızlı hareket → momentum yönünde
+            signal = 'UP' if t60_price > t0_price else 'DOWN'
+        elif velocity < 0.03:
+            # yavaş → reversal için güçlü zemin
+            pass
+
+# WR: velocity > 0.08 + momentum bet vs outcome
+# WR: velocity < 0.03 + streak bet vs outcome
+```
+
+**Öncelik:** Sen zaten bu veriyi topluyorsun. En düşük maliyetli test bu.
+
+---
+
+## TIER 2 — Güçlü Mekanizma, Biraz Daha Karmaşık
+
+---
+
+### E. Haftanın Günü Etkisi
+
+**Mekanizma:** Kripto piyasaları hafta sonu retail-dominant. Kurumsal akış yok, düşük hacim, mean-reversion daha belirgin.
+
+**Test (mevcut 3999 market):**
+```python
+from datetime import datetime
+
+for market in resolved_markets:
+    dow = datetime.utcfromtimestamp(market.open_time).weekday()
+    # 0=Mon, 6=Sun
+    # Streak WR by weekday
+    # T7 WR by weekday
+```
+
+**Beklenti:** Cuma/Cumartesi/Pazar → Streak WR daha yüksek (kurumsal arbitraj az).
+
+---
+
+### F. Coinbase vs Binance Fiyat Divergence (Lider-Takipçi)
+
+**Mekanizma:** Coinbase daha çok ABD kurumsal akışını yansıtır. Coinbase'de büyük bir hareket Binance'ten önce geliyorsa, Polymarket'ın Binance'e bağlı marketlerinde erken sinyal olur.
+
+```python
+# Coinbase Pro API: GET /products/BTC-USD/candles?granularity=60
+# Binance API: /api/v3/klines?symbol=BTCUSDT&interval=1m
+# Lead-lag cross-correlation: Coinbase t=0 → Binance t+1 korelasyonu
+
+# Pratik kullanım:
+# Eğer Coinbase son 1dk'da >+0.3% → Binance henüz fiyatlamadıysa → UP bet
+```
+
+**Zorluk:** İki API'yı eş zamanlı dinlemen ve senkronize etmen gerekiyor.
+**Potansiyel:** Bu en büyük edge kaynaklarından biri olabilir, çünkü Polymarket Binance'e bağlı ve Coinbase öne geçiyorsa ~15-30s arbitraj penceresi açılıyor.
+
+---
+
+### G. Tasfiye (Liquidation) Akışı
+
+**Mekanizma:** Binance futures büyük liquidation'ları spot fiyatı ani iterek/çekerek etkiler.
+- Büyük LONG liquidation → spot fiyat düşer → DOWN outcome ihtimali artar
+- Büyük SHORT liquidation → spot fiyat yükselir → UP outcome ihtimali artar
+
+```python
+# Binance FAPI WebSocket: 
+# wss://fstream.binance.com/ws/!forceOrder@arr
+# Her liquidation event için: side, quantity, price
+# Eğer last 60s içinde liquidation > $5M → sinyale ekle
+```
+
+**Backtest:** Binance `/fapi/v1/allForceOrders` historik liquidation verisi var mı? Kontrol et.
+
+---
+
+### H. Polymarket CLOB Derinlik Asimetrisi
+
+**Mekanizma:** Market açılırken CLOB'da UP ve DOWN token'ları için bid/ask derinliği asimetrik olabilir.
+
+- UP token ask çok ince, DOWN token ask kalın → UP'a alıcı baskısı yok → DOWN gidecek
+- Tersi → UP gidecek
+
+```python
+# /book endpoint'ten: market açılışından sonra 5s içinde
+up_token_ask_depth = sum(q for p,q in up_book['asks'] if p < 0.55)
+down_token_ask_depth = sum(q for p,q in down_book['asks'] if p < 0.55)
+imbalance = up_token_ask_depth / (up_token_ask_depth + down_token_ask_depth)
+
+# imbalance < 0.35 → UP token az alıcı → DOWN sinyal
+# imbalance > 0.65 → DOWN token az alıcı → UP sinyal
+```
+
+Sen zaten /book snapshot alıyorsun, bunu ekle.
+
+---
+
+## TIER 3 — Araştır, Hemen Uygulamaya Geçme
+
+---
+
+### I. Günlük Market Mean-Reversion (Zaten Konuşulmuştu)
+
+RSI>70 sonraki günün DOWN oranı — 1 yıl veri → anlamlı test.
+
+### J. SPY/QQQ Korelasyonu (US Saatlerinde)
+
+UTC 13:30-20:00 arası BTC, QQQ ile yüksek korelasyon gösteriyor. QQQ'nun 15dk hareketi Polymarket BTC marketini tahmin eder mi?
+
+**Test için:** Yahoo Finance (yfinance kütüphanesi) veya Polygon.io API. Ücretsiz tier var.
+
+```python
+import yfinance as yf
+qqq = yf.download('QQQ', period='90d', interval='15m')
+# Her US saati için: QQQ return son 15dk → BTC Polymarket outcome korelasyonu
+```
+
+### K. Önceki Market Sonucu (Lag-1 Autocorrelation)
+
+Streak reversal'ı biliyoruz ama daha ince soru: N=1 ve N=2 streak hangi saatlerde autocorrelation gösteriyor? Bazı saatlerde momentum (N=1 aynı yön), bazı saatlerde reversal (N=1 ters yön) çalışıyor olabilir.
+
+### L. BTC Halving Sonrası Rejim
+
+BTC 4 yıllık döngü içinde farklı davranıyor. Son halving Nisan 2024. Şu an "post-halving bull regime" — bu dönemde momentum stratejileri daha mı güçlü? Tarihsel karşılaştırma: 2020-2021 vs 2024-2025 aynı dönem pattern.
+
+---
+
+## Öncelik Sırası ve Somut Görevler
+
+**BUGÜN/YARIN (mevcut 3999 market verisiyle çalışır):**
+
+1. **Haftanın günü etkisi** — 10 satır kod, hemen yapılabilir
+2. **ATR rejim filtresi** — streak WR'ını high/low ATR'ya böl
+3. **Funding rate backtest** — Binance FAPI'den historik funding al, 3999 market ile çapraz
+
+**BU HAFTA (forward paper data + yeni API):**
+
+4. **İlk 60s velocity** — early_traj zaten var, analiz et
+5. **CLOB derinlik asimetrisi** — /book snapshot'a derinlik ölçümü ekle
+6. **Spot vs perp basis** — canlıda logla, biriktir
+
+**GELECEK HAFTA (daha fazla veri / API bağlantısı):**
+
+7. **Coinbase vs Binance divergence** — iki feed gerekiyor
+8. **Liquidation flow** — Binance FAPI WebSocket
+9. **QQQ korelasyonu** — yfinance ile hızlı test
+
+---
+
+## Teorik Beklentiler
+
+Benim görüşüm, **funding rate + ATR rejim filtresi** en verimli iki test:
+
+- **Funding rate:** Streak'ten tamamen bağımsız mekanizma. Yüksek pozitif funding + DOWN streak → iki bağımsız sinyal aynı yönde → WR %80+ olabilir.
+- **ATR filtresi:** Mevcut streak edge'ini güçlendirir. Sadece düşük ATR dönemlerinde streak al → saçmalığı eler → WR %75→%80+ atlayabilir.
+
+Bu ikisi mevcut veriyle backtest edilebilir. Hızlıca yap.
+
+---END---
