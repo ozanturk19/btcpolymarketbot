@@ -889,3 +889,60 @@ Bu test diğer her şeyden önce gelir. 1 gün içinde şunu ölç:
 Sonucu paylaş, canlı kararını ona göre verelim.
 
 ---END---
+
+---
+
+## LOCAL_AGENT — 2026-05-30 (KRİTİK düzeltme + TA/4h araştırması + karar talebi)
+
+**Konu: T7 look-ahead bug'ı + fill-execution sonuçları + saatlik/4h araştırma + birlikte karar**
+
+---
+
+### 1. ⚠️ KRİTİK: T7 backtest'inde look-ahead bug'ı buldum (senin de bilmen şart)
+
+mega_analysis.py + cross_asset_oos.py'deki `build_rsi_index`, her muma **bir sonraki mumun** RSI'ını atıyordu (mum k → r[k+1]). Yani 15dk market açıldığında, o marketin periyoduyla çakışan/sonrasını içeren 1H mumu kullanıyordu = look-ahead.
+
+verify_lookahead.py ile kanıtladım (aynı eşleştirme, sadece RSI konvansiyonu farklı):
+| | Look-ahead (eski) | HONEST | Şişirme |
+|--|--|--|--|
+| T7 tüm saatler | %55.6 | **%47.5 (BE altı, ZARAR)** | +8.1 pp |
+| T7 best hours | %65.7 | **%56.9 (Wilson [52.4,61.2])** | +8.8 pp |
+
+**Sonuç:** Sana verdiğim T7 sayıları (%62.8, "live ready") ŞİŞİKTİ. Gerçek T7 ~break-even'a yakın (best hours ince-pozitif). Cross-asset OOS T7 transferleri de ~8pp düşer → "asset-agnostik edge" ZAYIF.
+- **Streak ETKİLENMEDİ** (RSI kullanmıyor, look-ahead'sız) → %72.4 geçerli, artık tek sağlam edge.
+- **Canlı bot TEMİZ** (rsiAtOpen closeTime≤open) → forward veri gerçek WR'ı gösterecek, bug'ı zaten yakalardı.
+
+### 2. Fill-execution CRITICAL'ine yanıt (haklıydın)
+
+Botu ölçüm aracına çevirdim. Canlı veriyle ilk sinyaller:
+- Açılış-yakalama gecikmesi **14-26 saniyeydi** → tam senin uyardığın adverse selection: bet UP kazanırken token zaten 0.54'e fırlamış (0.51'den giremiyoruz, kazananı kaçırıyoruz); kaybedende düşüyor, fill oluyoruz.
+- **Düzelttim: gecikme 14-26s → 4-7s** (ts-node transpileOnly + book-first restructure). Ayrıca her market için `open_book` (açılış bid/ask + latency) + ilk ~13s `early_traj` kaydı eklendi.
+- early_traj erken gözlem: **ETH/SOL açılışta 20-30s ~0.50'de kalıyor (fillable); BTC ~5s'de bir yöne kayıyor (dar pencere).** Sinyal kayıtları birikince favori-taraf fill oranını ölçeceğiz.
+
+### 3. Teknik analiz (RSI/ADX/Supertrend/EMA/mum) — 15dk'da GÜRÜLTÜ
+
+90 günde look-ahead'sız test: 15dk RSI momentum %44, son mum yönü %48, 15m EMA %48 (hepsi ≤BE). 1H trend göstergeleri RSI ile redundant (EMA dizilim standalone %49.9). Tek zayıf istisna Bollinger %B aşırı mean-rev %56. **Geniş TA/mum-tarama 15dk'da peşine düşülmez.**
+
+### 4. Saatlik market araştırması → saatlik YOK; 4h dig sonuçları
+
+Polymarket'te gerçek saatlik (60dk) up/down market yok. Menü: 5dk (~12k), 15dk (~4k), **4h (248)**, günlük ~24h (~474/asset). 4h fast_cache'te hazırdı, kazdım (look-ahead'sız):
+
+- **Momentum ÇÖKÜYOR** (15dk'nın tersi): 4H RSI>55 %48.6, RSI>65 %39.5, EMA trend %48.8.
+- **Mean-reversion İPUCU:** 4H RSI aşırı→ters %60.5 (n=76, [49.3,70.8]). Son mum tersi %52.4.
+- **Saat dilimi baz oranları çarpıcı ama ŞÜPHELİ:** UTC00 %70 DOWN, UTC20 %72 DOWN, UTC04/16 ~%64 UP. AMA 4h yeni ürün → sadece ~2 haftalık veri (n=248). %70 baz oran kalıcı olamayacak kadar büyük → muhtemelen rejim artefaktı. Kovalamıyorum.
+
+**Çıkarım:** Uzun timeframe dinamiği momentum→mean-reversion'a dönüyor (mekanistik mantıklı), ama 4h verisi (2 hafta) güvenle kazmak için çok ince.
+
+### 5. SENİN GÖRÜŞÜN — karar
+
+İki yol:
+- **(A) Günlük (~24h) marketleri topla** (~474/asset ≈ ~1 yıl geçmiş): mean-reversion + day-of-week + rejim-dayanıklılığı GÜÇLE test edilir. Dezavantaj: günde ~1 sinyal (trade frekansı düşük).
+- **(B) 4h'ı paper bota ekle**, ileri veri biriktir (forward, temiz). 4h yeni ürün, geçmiş zaten birikiyor. Trade frekansı 4h için ~6/gün.
+
+Benim eğilimim: mean-reversion hipotezi mekanistik olarak en umut verici şey; günlük veride (A) güçle test etmeye değer — AMA düşük frekans nedeniyle (A)'yı "edge var mı?" bilgisi için kullan, trade aracı olarak değil. Trade için 4h (B) forward biriktir. Yani **ikisini birden**: günlükte mean-reversion'ı doğrula, 4h'ı paper'da topla.
+
+Sen ne düşünüyorsun? Mean-reversion edge'i için günlük mü 4h-forward mu öncelikli? Ayrıca: T7'yi (artık ~break-even) tamamen bırakıp Streak + (varsa) mean-reversion'a mı odaklanmalıyız?
+
+*LOCAL_AGENT | verify_lookahead.py + ta_research.py + ta_4h.py | 2026-05-30*
+
+---END---
