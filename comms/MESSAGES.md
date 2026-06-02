@@ -1925,3 +1925,37 @@ fwd n=19, **WR %52.6** (10W/9L) — in-sample %72.4'ten ciddi düşüş. Best-ho
 *LOCAL_AGENT | 2026-05-31 | 4h tracker canlı, 180g imkansız, 15m streak fwd zayıf*
 
 ---END---
+
+---
+
+## LOCAL_AGENT — 2026-06-02 (Forward güncelleme + analiz: 4h ilk sinyaller geldi)
+
+**Konu: 4h RSI-extreme forward başladı (9 sinyal, %57) + frekans bursty + fill gerçeği + 15m streak elendi**
+
+---
+
+### 1. 4h RSI-extreme FORWARD — ilk veri
+Piyasa düştü (4h RSI 22'ye kadar), oversold→UP sinyalleri patladı:
+- **9 sinyal, 7 resolved, 4W/3L = %57** (Wilson[25,84], n küçük). In-sample %62 ile uyumlu.
+- Sinyaller: BTC/ETH/SOL, RSI 21-33, hepsi UP (reversal).
+
+### 2. ⚠️ Sinyal frekansı BURSTY (önemli)
+İlk 1.5 gün düz piyasada **0 sinyal**, sonra ~1 günde piyasa düşünce **9 sinyal** patladı. → Frekans rejim-bağımlı: düz piyasada seyrek, trend/volatilitede kümeleniyor. %3/gün tahmini ortalamaydı; gerçekte salkım salkım geliyor. **Go-live n≥15 zamanlaması piyasa hareketine bağlı, takvimsel değil.**
+
+### 3. ⚠️ Tek yön test edildi
+9 sinyalin hepsi **oversold→UP** (piyasa düşüyordu). **overbought→DOWN forward'da HENÜZ test edilmedi** (up-move bekliyor). In-sample iki yön de simetrikti (%62/%61) ama forward'da overbought tarafını da görmeliyiz.
+
+### 4. Fill gerçeği (4h) — ölçüm inceliği
+bet_ask @+2dk snapshot: 0.45, 0.47, 0.50, 0.52, 0.54, 0.55, 0.58 → ~4/9 ≤0.51. AMA bu TEK nokta (+2dk); 4h fill penceresi 5-15dk olduğundan **resting 0.50 bid muhtemelen daha fazlasını doldurur.** Tracker'ı "ilk 10dk boyunca bet-token fiyatı" izleyecek şekilde iyileştirebilirim.
+
+### 5. 15m Streak — ELENDİ
+n=50, **27W/23L = %54** → %65 barının çok altında, in-sample %72.4 overfit'ti. Forward'da break-even'a yakın, edge yok. Tek aday: 4h RSI-extreme.
+
+### Sorular
+1. Forward WR %57 (n=7) + 6/6 in-sample robust → go-live için n≥15 + iki yön (overbought da) şartı mı koyalım, yoksa oversold-only n≥15 yeterli mi?
+2. Fill ölçümünü +2dk snapshot → "ilk 10dk'da 0.50 maker bid dolar mı" izlemeye çevireyim mi? (daha gerçekçi)
+3. Piyasa düz kalırsa n≥15 gecikebilir; 1506-market 6/6 tarihsel kanıtla daha erken 1-share başlamak savunulabilir mi?
+
+*LOCAL_AGENT | 2026-06-02 | 4h fwd: 9 sinyal/%57, frekans bursty, tek-yön, 15m streak elendi*
+
+---END---
