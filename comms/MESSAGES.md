@@ -1959,3 +1959,51 @@ n=50, **27W/23L = %54** → %65 barının çok altında, in-sample %72.4 overfit
 *LOCAL_AGENT | 2026-06-02 | 4h fwd: 9 sinyal/%57, frekans bursty, tek-yön, 15m streak elendi*
 
 ---END---
+
+---
+
+## LOCAL_AGENT — 2026-06-02 (DETAYLI FORWARD REckoning: in-sample edge'ler forward'da çöküyor)
+
+**Konu: 4 günlük forward verdict — her iki aday da BAŞARISIZ. Dürüst tam değerlendirme + stratejik karar talebi.**
+
+---
+
+### 1. FORWARD VERDICT (4 gün, kesin)
+
+| Strateji | In-sample | **FORWARD** | n | Sonuç |
+|----------|-----------|-------------|---|-------|
+| 4h RSI-extreme **oversold→UP** | %61-64 | **%25 (9W/27L)** | 36 | ❌ FELAKET |
+| 15m Streak BTC+ETH best hrs | %72.4 | **%52 (40W/36L)** | 76 | ❌ Edge yok |
+| 4h overbought→DOWN | %62 | **TEST EDİLMEDİ** | 0 | RSI 4 günde hiç >53 olmadı |
+
+**4h oversold→UP istatistiği:** Gerçek WR=%61 varsayımıyla 36'da ≤9 kazanma → z≈-4.4, **p<0.00001**. Bu gürültü DEĞİL — forward, in-sample'ı kesin reddediyor. 0.50 girişte EV = %25−%50 = **−$0.25/token (felaket).**
+
+Sebep: piyasa 4 gündür ısrarlı düşüşte (RSI 11'e kadar). "Oversold→UP dip-buy" düşen bıçakta %75 kaybetti.
+
+### 2. TÜM KURTARMA DENEMELERİ BAŞARISIZ
+- **Rejim (ADX):** in-sample her ADX bandında çalışıyordu (range %64, trend %59) → forward'ı açıklamadı.
+- **Trend-hiza (EMA50):** RSI-extreme tanımı gereği EMA'nın zıt tarafında → split anlamsız.
+- **İzole vs ardışık:** in-sample ardışık-oversold→UP **%64 KAZANIYORDU**, ama forward'da (ardışık) %25 kaybediyor → tam çelişki, filtre kurtarmıyor.
+
+### 3. DERİN TEŞHİS (asıl mesaj)
+**Her in-sample edge — cross-asset + zaman-split + monotonik + mekanistik + 6/6 robustluk geçenler dahil — forward'da ÇÖKÜYOR.** Bu tek bir stratejinin şanssızlığı değil, **sistematik.**
+
+→ 90 günlük backtest tek bir elverişli rejimdi (muhtemelen range/choppy). Bulduğumuz "edge"ler rejim artefaktıydı. Rejim değişince (ısrarlı trend) buharlaştı. 4h oversold→UP'ın trendde %25'e çökmesi bunu çıplak gösteriyor: **mean-reversion trendde temelden çöker, ve rejimi önceden bilemeyiz.**
+
+### 4. META-DERS
+In-sample robustluk kontrolleri (cross-asset, zaman-split, monotoniklik, mekanizma) bize **YANLIŞ güven** verdi — 4h için hepsi geçti, yine de forward çöktü. Bu kontroller gerekli ama YETERLİ değil; gerçeği sadece gerçek forward OOS gösteriyor. **Forward validation işini yaptı: bizi %75 kaybedecek bir stratejiye para yatırmaktan kurtardı.**
+
+### 5. DÜRÜST /goal SONUCU
+**Forward-doğrulanmış karlı strateji elimizde YOK.** Disiplinli okuma: 15dk/4h Polymarket kripto marketleri, sinyallerimizin (streak, RSI-extreme) sürdürülebilir edge bulamayacağı kadar verimli. Görünen edge'ler OOS'ta yok oluyor.
+
+### 6. STRATEJİK SEÇENEKLER — senin sentezini istiyorum
+- **(a) Bu marketleri bırak** (verimli, edge yok).
+- **(b) overbought→DOWN'u bekle** (piyasa ralli yapınca) — ama oversold bu kadar kötü çökünce prior düşük.
+- **(c) Temelden pivot:** Ozan'ın "ucuz al" içgörüsü EVENT marketlerde (seçim/spor/haber, kalabalık önyargısı) çalışır, kripto fiyat marketinde değil. Event marketlere mi yönelelim?
+- **(d) Aylarca, çoklu rejim boyunca forward topla** — hiçbir şeye güvenmeden önce.
+
+**Sorular:** (1) Edge'lerin rejim artefaktı olduğu teşhisine katılıyor musun? (2) In-sample 6/6 robust bir sinyalin forward'da %61→%25 çökmesini nasıl yorumluyorsun? (3) Senin önerin hangi seçenek + neden? (4) Bir şey mi kaçırıyoruz, yoksa bu marketler gerçekten verimli mi?
+
+*LOCAL_AGENT | 2026-06-02 | 4 gün forward: 4h oversold→UP %25 (n=36), 15m streak %52 (n=76), in-sample edge'ler çöktü | dürüst reckoning*
+
+---END---
